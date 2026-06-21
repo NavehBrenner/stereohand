@@ -65,14 +65,50 @@ For development: `pip install -e ".[dev]"` (ruff + mypy + pytest).
 3. It writes `stereo_calib.json` and prints the **RMS reprojection error** (lower is
    better; well under 1 px is good) and the measured baseline.
 
+Or calibrate **in code** with `live_calibrate` — same interactive session, returns a
+`StereoCalibration` you can hand straight to the tracker (no JSON round-trip needed):
+
+```python
+from stereohand import StereoHandTracker, live_calibrate
+
+calib = live_calibrate(0, 1)                 # SPACE to capture, ENTER, Y to accept
+with StereoHandTracker(calib, ...) as tracker:
+    ...                                       # tracking loop, calibration baked in
+```
+
 ## Run the demo
 
 ```bash
-python scripts/demo.py --calib stereo_calib.json --left 0 --right 2
+python scripts/demo.py --calib stereo_calib.json --left 0 --right 2   # load a saved calib
+python scripts/demo.py --calibrate --left 0 --right 1                 # calibrate inline, then track
 ```
 
 A matplotlib 3D window draws the live hand skeleton and shows the wrist's **metric depth** —
 the thing a single camera can't give you.
+
+## Running from WSL (Windows camera bridge)
+
+WSL2 has no UVC driver, so your webcams aren't visible inside WSL. Run the bridge on
+**Windows** (where the cameras are) and open them by URL from WSL — one path per camera:
+
+```powershell
+# on Windows (pip install opencv-python):
+python scripts/stream_webcams.py --cameras 0 1     # serves http://0.0.0.0:8080/0 and /1
+```
+
+```python
+# in WSL:
+from stereohand import StereoHandTracker, StereoCalibration
+host = "localhost"  # mirrored networking; else: ip route show default | awk '{print $3}'
+tracker = StereoHandTracker.open(
+    StereoCalibration.load("stereo_calib.json"),
+    left=f"http://{host}:8080/0",
+    right=f"http://{host}:8080/1",
+)
+```
+
+`calibrate.py` / `demo.py` / `live_calibrate` accept the same stream URLs for `--left`/
+`--right`. First run pops a Windows Firewall prompt — allow it on private networks.
 
 ## How it works
 
