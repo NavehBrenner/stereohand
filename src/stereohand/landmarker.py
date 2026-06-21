@@ -64,14 +64,14 @@ def parse_result(result: Any, width: int, height: int) -> HandLandmarks2D | None
 
 
 # Exact colors from mediapipe/python/solutions/drawing_styles.py (BGR).
-_WHITE  = (224, 224, 224)
-_RED    = (48,  48,  255)
-_PEACH  = (180, 229, 255)
-_PURPLE = (128,  64, 128)
-_YELLOW = (0,   204, 255)
-_GREEN  = (48,  255,  48)
-_BLUE   = (192, 101,  21)
-_GRAY   = (128, 128, 128)
+_WHITE = (224, 224, 224)
+_RED = (48, 48, 255)
+_PEACH = (180, 229, 255)
+_PURPLE = (128, 64, 128)
+_YELLOW = (0, 204, 255)
+_GREEN = (48, 255, 48)
+_BLUE = (192, 101, 21)
+_GRAY = (128, 128, 128)
 
 # Landmark color per index — matches get_default_hand_landmarks_style().
 # Palm: 0, 1, 5, 9, 13, 17 → RED
@@ -81,11 +81,27 @@ _GRAY   = (128, 128, 128)
 # Ring PIP/DIP/TIP: 14, 15, 16 → GREEN
 # Pinky PIP/DIP/TIP: 18, 19, 20 → BLUE
 _LM_COLOR: list[tuple[int, int, int]] = [
-    _RED, _RED, _PEACH, _PEACH, _PEACH,        # 0-4
-    _RED, _PURPLE, _PURPLE, _PURPLE,            # 5-8
-    _RED, _YELLOW, _YELLOW, _YELLOW,            # 9-12
-    _RED, _GREEN, _GREEN, _GREEN,               # 13-16
-    _RED, _BLUE, _BLUE, _BLUE,                  # 17-20
+    _RED,
+    _RED,
+    _PEACH,
+    _PEACH,
+    _PEACH,  # 0-4
+    _RED,
+    _PURPLE,
+    _PURPLE,
+    _PURPLE,  # 5-8
+    _RED,
+    _YELLOW,
+    _YELLOW,
+    _YELLOW,  # 9-12
+    _RED,
+    _GREEN,
+    _GREEN,
+    _GREEN,  # 13-16
+    _RED,
+    _BLUE,
+    _BLUE,
+    _BLUE,  # 17-20
 ]
 _LM_RADIUS = 5
 _LM_BORDER_RADIUS = max(_LM_RADIUS + 1, int(_LM_RADIUS * 1.2))  # = 6
@@ -93,18 +109,32 @@ _LM_BORDER_RADIUS = max(_LM_RADIUS + 1, int(_LM_RADIUS * 1.2))  # = 6
 # Connection (a, b, color, thickness) — matches get_default_hand_connections_style().
 _CONN: list[tuple[int, int, tuple[int, int, int], int]] = [
     # Palm — GRAY, thickness 3
-    (0, 1, _GRAY, 3), (0, 5, _GRAY, 3), (9, 13, _GRAY, 3),
-    (13, 17, _GRAY, 3), (5, 9, _GRAY, 3), (0, 17, _GRAY, 3),
+    (0, 1, _GRAY, 3),
+    (0, 5, _GRAY, 3),
+    (9, 13, _GRAY, 3),
+    (13, 17, _GRAY, 3),
+    (5, 9, _GRAY, 3),
+    (0, 17, _GRAY, 3),
     # Thumb — PEACH, thickness 2
-    (1, 2, _PEACH, 2), (2, 3, _PEACH, 2), (3, 4, _PEACH, 2),
+    (1, 2, _PEACH, 2),
+    (2, 3, _PEACH, 2),
+    (3, 4, _PEACH, 2),
     # Index — PURPLE, thickness 2
-    (5, 6, _PURPLE, 2), (6, 7, _PURPLE, 2), (7, 8, _PURPLE, 2),
+    (5, 6, _PURPLE, 2),
+    (6, 7, _PURPLE, 2),
+    (7, 8, _PURPLE, 2),
     # Middle — YELLOW, thickness 2
-    (9, 10, _YELLOW, 2), (10, 11, _YELLOW, 2), (11, 12, _YELLOW, 2),
+    (9, 10, _YELLOW, 2),
+    (10, 11, _YELLOW, 2),
+    (11, 12, _YELLOW, 2),
     # Ring — GREEN, thickness 2
-    (13, 14, _GREEN, 2), (14, 15, _GREEN, 2), (15, 16, _GREEN, 2),
+    (13, 14, _GREEN, 2),
+    (14, 15, _GREEN, 2),
+    (15, 16, _GREEN, 2),
     # Pinky — BLUE, thickness 2
-    (17, 18, _BLUE, 2), (18, 19, _BLUE, 2), (19, 20, _BLUE, 2),
+    (17, 18, _BLUE, 2),
+    (18, 19, _BLUE, 2),
+    (19, 20, _BLUE, 2),
 ]
 _HANDEDNESS_COLOR = (54, 205, 88)  # green (BGR) — matches MediaPipe notebook
 _MARGIN = 10
@@ -137,8 +167,14 @@ def draw_landmarks_on_frame(
     x_min = int(pts[:, 0].min()) - _MARGIN
     y_min = int(pts[:, 1].min()) - _MARGIN
     cv2.putText(
-        annotated, landmarks.handedness, (x_min, y_min),
-        cv2.FONT_HERSHEY_DUPLEX, 1, _HANDEDNESS_COLOR, 1, cv2.LINE_AA,
+        annotated,
+        landmarks.handedness,
+        (x_min, y_min),
+        cv2.FONT_HERSHEY_DUPLEX,
+        1,
+        _HANDEDNESS_COLOR,
+        1,
+        cv2.LINE_AA,
     )
     return annotated
 

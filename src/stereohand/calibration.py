@@ -294,7 +294,8 @@ def _solve_with_spinner(
     font = cv2.FONT_HERSHEY_SIMPLEX
     while thread.is_alive():
         panel = np.zeros((100, 520, 3), dtype=np.uint8)
-        cv2.putText(panel, f"Computing calibration...  {next(spinner)}", (12, 58), font, 0.8, (255, 255, 255), 2)
+        text = f"Computing calibration...  {next(spinner)}"
+        cv2.putText(panel, text, (12, 58), font, 0.8, (255, 255, 255), 2)
         cv2.imshow(window, panel)
         cv2.waitKey(100)
 
@@ -358,7 +359,7 @@ def live_calibrate(
                 auto_capture_interval_s=auto_capture_interval_s,
                 window=window,
             )
-            calibration = _solve_with_spinner(
+            calibration: StereoCalibration = _solve_with_spinner(
                 cv2, calibrate_from_charuco, left_frames, right_frames, spec=spec, window=window
             )
             if _confirm(cv2, calibration, auto_accept=auto_accept, max_rms=max_rms, window=window):

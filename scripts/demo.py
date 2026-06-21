@@ -18,17 +18,23 @@ from stereohand import RenderConfig, StereoCalibration, StereoHandTracker, live_
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--calib", default="stereo_calib.json")
-    parser.add_argument("--calibrate", action="store_true",
-                        help="run calibration first then start demo")
-    parser.add_argument("--left",  default="0")
+    parser.add_argument(
+        "--calibrate", action="store_true", help="run calibration first then start demo"
+    )
+    parser.add_argument("--left", default="0")
     parser.add_argument("--right", default="2")
-    parser.add_argument("--smooth", type=float, default=0.5,
-                        help="EMA alpha: 1=no smoothing, 0.1=very smooth (default 0.5)")
-    parser.add_argument("--mirror", action="store_true",
-                        help="flip the view horizontally (mirror mode)")
+    parser.add_argument(
+        "--smooth",
+        type=float,
+        default=0.5,
+        help="EMA alpha: 1=no smoothing, 0.1=very smooth (default 0.5)",
+    )
+    parser.add_argument(
+        "--mirror", action="store_true", help="flip the view horizontally (mirror mode)"
+    )
     args = parser.parse_args()
 
-    left  = int(args.left)  if args.left.isdigit()  else args.left
+    left = int(args.left) if args.left.isdigit() else args.left
     right = int(args.right) if args.right.isdigit() else args.right
     calib = (
         live_calibrate(left, right, save_path=args.calib)
@@ -39,7 +45,11 @@ def main() -> None:
     render_cfg = RenderConfig(mirror=args.mirror, smooth=args.smooth)
 
     with StereoHandTracker.open(
-        calib, left=left, right=right, render=True, render_config=render_cfg,
+        calib,
+        left=left,
+        right=right,
+        render=True,
+        render_config=render_cfg,
     ) as tracker:
         tracker.run()
 

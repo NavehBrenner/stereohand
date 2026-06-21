@@ -7,6 +7,7 @@ Works with camera indices (native) or stream URLs (WSL via Windows bridge)::
 
 Press Q to quit.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,7 +18,7 @@ _cv2_spec = importlib.util.find_spec("cv2")
 if _cv2_spec and _cv2_spec.origin:
     Path(_cv2_spec.origin).parent.joinpath("qt", "fonts").mkdir(parents=True, exist_ok=True)
 
-import cv2
+import cv2  # noqa: E402  (after cv2-Qt font path fix above)
 
 
 def main() -> None:

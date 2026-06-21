@@ -90,7 +90,7 @@ class StereoHandTracker:
         self._t0 = time.monotonic()
         self._latest = _ABSENT
         self.last_frames: tuple[Frame, Frame] | None = None  # latest raw pair, for display
-        self.last_processed_frames: tuple[Frame, Frame] | None = None  # post-rectify, fed to landmarker
+        self.last_processed_frames: tuple[Frame, Frame] | None = None  # post-rectify, to landmarker
         self.last_landmark_2d: tuple[HandLandmarks2D | None, HandLandmarks2D | None] | None = None
         self._renderer = renderer
         self._lock = threading.Lock()
@@ -199,9 +199,7 @@ class StereoHandTracker:
         tracker thread keeps running; this just visualises the latest state.
         """
         if self._renderer is None:
-            raise RuntimeError(
-                "render_step() requires render=True in StereoHandTracker.open()"
-            )
+            raise RuntimeError("render_step() requires render=True in StereoHandTracker.open()")
         reading = self.read()  # also starts the background thread on first call
         return self._renderer.step(
             frames=self.last_processed_frames,
