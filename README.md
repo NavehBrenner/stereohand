@@ -28,8 +28,8 @@ with StereoHandTracker.open(calib, left=0, right=2) as tracker:
 ## Install
 
 ```bash
-pip install git+https://github.com/NavehBrenner/stereohand        # library
-pip install "git+https://github.com/NavehBrenner/stereohand#egg=stereohand[demo]"  # + 3D demo viewer
+pip install git+https://github.com/NavehBrenner/stereohand                       # library
+pip install "stereohand[demo] @ git+https://github.com/NavehBrenner/stereohand"  # + 3D demo viewer
 ```
 
 For development: `pip install -e ".[dev]"` (ruff + mypy + pytest).
