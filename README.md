@@ -88,27 +88,63 @@ the thing a single camera can't give you.
 
 ## Running from WSL (Windows camera bridge)
 
-WSL2 has no UVC driver, so your webcams aren't visible inside WSL. Run the bridge on
-**Windows** (where the cameras are) and open them by URL from WSL — one path per camera:
+WSL2's kernel has no UVC driver, so your webcams never appear inside WSL (no `/dev/video*`).
+The fix: run the cameras on **Windows** and have them serve MJPEG-over-HTTP streams that the
+WSL side opens by URL — `stream_webcams.py` serves one stream per camera at `/<index>`.
 
-```powershell
-# on Windows (pip install opencv-python):
-python scripts/stream_webcams.py --cameras 0 1     # serves http://0.0.0.0:8080/0 and /1
-```
+Do the steps in order. Step 1 runs **in WSL**, step 2 in a **Windows PowerShell** window,
+steps 3–4 **back in WSL**. (Replace `0 1` with your camera indices — the built-in cam is
+usually `0`, a USB webcam `1`; try `2` if not.)
 
-```python
-# in WSL:
-from stereohand import StereoHandTracker, StereoCalibration
-host = "localhost"  # mirrored networking; else: ip route show default | awk '{print $3}'
-tracker = StereoHandTracker.open(
-    StereoCalibration.load("stereo_calib.json"),
-    left=f"http://{host}:8080/0",
-    right=f"http://{host}:8080/1",
-)
-```
+1. **(WSL)** Install stereohand, and copy the bridge script onto your Windows Desktop so
+   it's easy to reach from PowerShell. From the cloned repo root:
+   ```bash
+   pip install -e ".[demo]"
+   cp scripts/stream_webcams.py "$(wslpath "$(powershell.exe -NoProfile -Command \
+       '[Environment]::GetFolderPath("Desktop")' | tr -d '\r')")/"
+   ```
 
-`calibrate.py` / `demo.py` / `live_calibrate` accept the same stream URLs for `--left`/
-`--right`. First run pops a Windows Firewall prompt — allow it on private networks.
+2. **(Windows PowerShell)** Open PowerShell (Start → type "PowerShell" → Enter). Install
+   Python if you don't have it (`winget install Python.Python.3.12`), then start the bridge:
+   ```powershell
+   pip install opencv-python
+   python "$env:USERPROFILE\Desktop\stream_webcams.py" --cameras 0 1
+   ```
+   You should see one line per camera, and the window stays open (it's serving — leave it
+   running):
+   ```
+   camera 0: http://0.0.0.0:8080/0
+   camera 1: http://0.0.0.0:8080/1
+   ```
+   The first run pops a **Windows Firewall** prompt — tick **Private networks** and *Allow
+   access*, or WSL can't connect. (Camera light on? Good. Index wrong? Adjust `--cameras`.)
+
+3. **(WSL)** Find the Windows host address and sanity-check **both** streams before running:
+   ```bash
+   WIN=$(ip route show default | awk '{print $3}')    # e.g. 172.20.16.1
+   curl -sI "http://$WIN:8080/0" | head -1             # expect: HTTP/1.0 200 OK
+   curl -sI "http://$WIN:8080/1" | head -1             # expect: HTTP/1.0 200 OK
+   ```
+   WSL is a VM with its own network, so Windows isn't `localhost` — it's the NAT gateway
+   that `ip route` extracts. `200 OK` confirms the firewall is open and the streams are live.
+   (Enabled *mirrored* networking — `networkingMode=mirrored` in `%UserProfile%\.wslconfig`?
+   Then Windows *is* `localhost`; set `WIN=localhost`.)
+
+4. **(WSL)** Run the pipeline against the two stream URLs. Calibrate inline, then track:
+   ```bash
+   python scripts/demo.py --calibrate \
+       --left  "http://$WIN:8080/0" \
+       --right "http://$WIN:8080/1"
+   ```
+   `calibrate.py`, `demo.py`, and `live_calibrate(...)` all accept these URLs anywhere they
+   take a `--left`/`--right` (or `left=`/`right=`). In code:
+   ```python
+   from stereohand import StereoHandTracker, live_calibrate
+   host = "172.20.16.1"  # the $WIN address from step 3 (or "localhost" with mirrored networking)
+   left, right = f"http://{host}:8080/0", f"http://{host}:8080/1"
+   calib = live_calibrate(left, right)
+   tracker = StereoHandTracker.open(calib, left=left, right=right)
+   ```
 
 ## How it works
 
