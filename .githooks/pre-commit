@@ -5,7 +5,7 @@
 set -euo pipefail
 
 if [ ! -x .venv/bin/ruff ]; then
-    echo "pre-commit: no .venv/bin/ruff — run 'scripts/setup.sh'; skipping." >&2
+    echo "pre-commit: no .venv/bin/ruff — run 'uv pip install -e .[dev]'; skipping." >&2
     exit 0
 fi
 

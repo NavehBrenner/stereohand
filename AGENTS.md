@@ -5,15 +5,14 @@
 
 ## Setup & Environment
 - Environment: Python 3.12+ virtual environment.
-- One-shot setup: `./scripts/setup.sh` (creates `.venv`, installs `.[dev,demo]`, enables git hooks).
-- Manual install: `pip install -e ".[dev,demo]"`
+- Installation: `pip install -e ".[dev,demo]"`
+- Enable git hooks once per clone: `git config core.hooksPath .githooks`
 - Tools: `ruff` (lint/format), `mypy` (types), `pytest` (tests).
 
 ## Git workflow & hooks
 - `master` is the default branch and is **protected** — no direct pushes; all changes land via PR.
 - Work on a feature branch, open a PR, let CI pass, merge in the GitHub UI.
-- Local git hooks live in `.githooks/` (version-controlled). Enable them once per clone
-  (`scripts/setup.sh` does this for you):
+- Local git hooks live in `.githooks/` (version-controlled). Enable them once per clone:
   ```bash
   git config core.hooksPath .githooks
   ```
