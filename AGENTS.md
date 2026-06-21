@@ -6,7 +6,19 @@
 ## Setup & Environment
 - Environment: Python 3.12+ virtual environment.
 - Installation: `pip install -e ".[dev,demo]"`
+- Enable git hooks once per clone: `git config core.hooksPath .githooks`
 - Tools: `ruff` (lint/format), `mypy` (types), `pytest` (tests).
+
+## Git workflow & hooks
+- `master` is the default branch and is **protected** — no direct pushes; all changes land via PR.
+- Work on a feature branch, open a PR, let CI pass, merge in the GitHub UI.
+- Local git hooks live in `.githooks/` (version-controlled). Enable them once per clone:
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+  - **pre-commit**: `ruff format` on staged Python, re-staging what it touches.
+  - **pre-push**: full CI gate — `ruff check` + `ruff format --check` + `mypy src` + `pytest`.
+  Both no-op gracefully if `.venv` is missing.
 
 ## Key Operational Scripts
 The project provides several scripts in the `scripts/` directory for core operations:

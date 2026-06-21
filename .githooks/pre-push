@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Block pushes that don't pass the CI gate: ruff lint + format check, mypy, pytest.
+# Uses `python -m` (not the .venv console scripts) because a relocated .venv has
+# stale shebangs.
+set -euo pipefail
+
+if [ ! -x .venv/bin/python ]; then
+    echo "pre-push: no .venv — run 'uv pip install -e .[dev]'; skipping." >&2
+    exit 0
+fi
+
+PY=.venv/bin/python
+
+echo "pre-push: ruff check..."
+"$PY" -m ruff check .
+echo "pre-push: ruff format --check..."
+"$PY" -m ruff format --check .
+echo "pre-push: mypy..."
+"$PY" -m mypy src
+echo "pre-push: pytest..."
+"$PY" -m pytest -q
