@@ -12,6 +12,12 @@ or R redoes. For the equivalent in code, call ``stereohand.live_calibrate`` dire
 from __future__ import annotations
 
 import argparse
+import importlib.util
+from pathlib import Path
+
+_cv2_spec = importlib.util.find_spec("cv2")
+if _cv2_spec and _cv2_spec.origin:
+    Path(_cv2_spec.origin).parent.joinpath("qt", "fonts").mkdir(parents=True, exist_ok=True)
 
 from stereohand import live_calibrate
 

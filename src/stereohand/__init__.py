@@ -20,7 +20,8 @@ from __future__ import annotations
 from stereohand.board import BOARD, CharucoBoardSpec, make_board, render_board
 from stereohand.calibration import StereoCalibration, calibrate_from_charuco, live_calibrate
 from stereohand.capture import StereoCapture
-from stereohand.landmarker import HandLandmarker, HandLandmarks2D
+from stereohand.landmarker import HandLandmarker, HandLandmarks2D, draw_landmarks_on_frame
+from stereohand.renderer import RenderConfig
 from stereohand.tracker import StereoHandReading, StereoHandTracker
 from stereohand.triangulation import triangulate_points
 
@@ -31,11 +32,13 @@ __all__ = [
     "StereoHandTracker",
     "StereoHandReading",
     "StereoCalibration",
+    "RenderConfig",
     "calibrate_from_charuco",
     "live_calibrate",
     "StereoCapture",
     "HandLandmarker",
     "HandLandmarks2D",
+    "draw_landmarks_on_frame",
     "triangulate_points",
     "BOARD",
     "CharucoBoardSpec",

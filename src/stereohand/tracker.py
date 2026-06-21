@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,6 +29,10 @@ from stereohand.landmarker import HandLandmarks2D
 from stereohand.triangulation import triangulate_points
 
 FloatArray = NDArray[np.float64]
+
+# Lazy import: only pulled in when render=True so headless stays cv2-free.
+if TYPE_CHECKING:
+    from stereohand.renderer import HandRenderer, RenderConfig
 Frame = NDArray[np.uint8]
 
 
@@ -74,6 +79,7 @@ class StereoHandTracker:
         landmarker_right: LandmarkerLike,
         *,
         rectify: bool = True,
+        renderer: HandRenderer | None = None,
     ) -> None:
         self._calib = calibration
         self._capture = capture
@@ -83,9 +89,16 @@ class StereoHandTracker:
         self._maps: tuple[FloatArray, FloatArray, FloatArray, FloatArray] | None = None
         self._t0 = time.monotonic()
         self._latest = _ABSENT
+        self.last_frames: tuple[Frame, Frame] | None = None  # latest raw pair, for display
+        self.last_processed_frames: tuple[Frame, Frame] | None = None  # post-rectify, fed to landmarker
+        self.last_landmark_2d: tuple[HandLandmarks2D | None, HandLandmarks2D | None] | None = None
+        self._renderer = renderer
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Landmark both views concurrently: each view has its own detector, so the two
+        # ~20 ms CPU inferences overlap instead of summing (≈25→40 fps on the step thread).
+        self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="stereo-lm")
 
     @classmethod
     def open(
@@ -95,11 +108,30 @@ class StereoHandTracker:
         left: int | str = 0,
         right: int | str = 2,
         max_skew_s: float = 0.02,
+        render: bool = False,
+        render_config: RenderConfig | None = None,
         **landmarker_kwargs: Any,
     ) -> StereoHandTracker:
-        """Live factory: real :class:`StereoCapture` + two :class:`HandLandmarker`s."""
+        """Live factory: real :class:`StereoCapture` + two :class:`HandLandmarker`s.
+
+        Parameters
+        ----------
+        render:
+            If ``True``, create a cv2 visualisation window.  The window is driven by
+            :meth:`run` (blocking main-thread loop) or manually via :meth:`render_step`.
+        render_config:
+            Visualisation options (mirror, smoothing, …).  Ignored when *render* is
+            ``False``.  Defaults to :class:`RenderConfig()` when *render* is ``True``.
+        """
         from stereohand.capture import StereoCapture
         from stereohand.landmarker import HandLandmarker
+
+        renderer: HandRenderer | None = None
+        if render:
+            from stereohand.renderer import HandRenderer as _HR
+            from stereohand.renderer import RenderConfig as _RC
+
+            renderer = _HR(render_config or _RC())
 
         capture = StereoCapture(left, right, max_skew_s=max_skew_s)
         return cls(
@@ -107,6 +139,7 @@ class StereoHandTracker:
             capture,
             HandLandmarker(**landmarker_kwargs),
             HandLandmarker(**landmarker_kwargs),
+            renderer=renderer,
         )
 
     def step(self) -> StereoHandReading:
@@ -115,14 +148,18 @@ class StereoHandTracker:
         if pair is None:
             return self._publish(_ABSENT)
         left, right = pair
+        self.last_frames = (left, right)
         if self._rectify:
             if self._maps is None:
                 self._maps = self._calib.rectification_maps()
             left, right = self._calib.rectify_pair(left, right, self._maps)
+        self.last_processed_frames = (left, right)
 
         timestamp_ms = int((time.monotonic() - self._t0) * 1000)
+        fut_right = self._pool.submit(self._lm_right.process, right, timestamp_ms)
         landmarks_left = self._lm_left.process(left, timestamp_ms)
-        landmarks_right = self._lm_right.process(right, timestamp_ms)
+        landmarks_right = fut_right.result()
+        self.last_landmark_2d = (landmarks_left, landmarks_right)
         # Drop-out if the hand is missing in *either* view — can't triangulate from one.
         if landmarks_left is None or landmarks_right is None:
             return self._publish(_ABSENT)
@@ -153,13 +190,45 @@ class StereoHandTracker:
         while not self._stop.is_set():
             self.step()
 
+    # -- Visualisation (main-thread) ----------------------------------------
+
+    def render_step(self) -> bool:
+        """Drive the renderer for one frame.  Returns ``False`` when the window closes.
+
+        Must be called from the **main thread** (cv2 GUI requirement).  The background
+        tracker thread keeps running; this just visualises the latest state.
+        """
+        if self._renderer is None:
+            raise RuntimeError(
+                "render_step() requires render=True in StereoHandTracker.open()"
+            )
+        reading = self.read()  # also starts the background thread on first call
+        return self._renderer.step(
+            frames=self.last_processed_frames,
+            landmarks_2d=self.last_landmark_2d,
+            landmarks_3d=reading.landmarks if reading.present else None,
+            present=reading.present,
+        )
+
+    def run(self) -> None:
+        """Blocking main-thread loop: read + render until the user quits.
+
+        Convenience wrapper around :meth:`render_step` — call this from ``main()`` and
+        forget about the loop.
+        """
+        while self.render_step():
+            pass
+
     def close(self) -> None:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=1.0)
+        self._pool.shutdown(wait=True)
         self._capture.close()
         self._lm_left.close()
         self._lm_right.close()
+        if self._renderer is not None:
+            self._renderer.destroy()
 
     def __enter__(self) -> StereoHandTracker:
         return self

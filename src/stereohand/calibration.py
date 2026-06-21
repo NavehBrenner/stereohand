@@ -17,7 +17,9 @@ consumes. Calibration is valid only until the rig is physically disturbed.
 
 from __future__ import annotations
 
+import itertools
 import json
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -269,6 +271,38 @@ def _board_detected(detector: Any, gray: Any, min_corners: int = 6) -> tuple[Any
     return corners, ids
 
 
+def _solve_with_spinner(
+    cv2: Any,
+    fn: Any,
+    *args: Any,
+    window: str,
+    **kwargs: Any,
+) -> Any:
+    """Run fn(*args, **kwargs) in a daemon thread; animate a spinner in the cv2 window."""
+    result: list[Any] = []
+    exc: list[BaseException] = []
+
+    def _worker() -> None:
+        try:
+            result.append(fn(*args, **kwargs))
+        except BaseException as e:
+            exc.append(e)
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    spinner = itertools.cycle(r"|\-/")
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    while thread.is_alive():
+        panel = np.zeros((100, 520, 3), dtype=np.uint8)
+        cv2.putText(panel, f"Computing calibration...  {next(spinner)}", (12, 58), font, 0.8, (255, 255, 255), 2)
+        cv2.imshow(window, panel)
+        cv2.waitKey(100)
+
+    if exc:
+        raise exc[0]
+    return result[0]
+
+
 def live_calibrate(
     left_source: int | str,
     right_source: int | str,
@@ -324,7 +358,9 @@ def live_calibrate(
                 auto_capture_interval_s=auto_capture_interval_s,
                 window=window,
             )
-            calibration = calibrate_from_charuco(left_frames, right_frames, spec=spec)
+            calibration = _solve_with_spinner(
+                cv2, calibrate_from_charuco, left_frames, right_frames, spec=spec, window=window
+            )
             if _confirm(cv2, calibration, auto_accept=auto_accept, max_rms=max_rms, window=window):
                 break
     finally:
