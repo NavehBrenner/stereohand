@@ -17,10 +17,15 @@ dependencies = [
     "opencv-contrib-python>=4.9",
     # Modern Tasks HandLandmarker API (not the legacy mediapipe.solutions.hands).
     "mediapipe>=0.10.35",
+    # Emit a correctly-scaled printable PDF of the calibration board (cv2 can't).
+    "pillow>=10",
 ]
 
 [project.optional-dependencies]
 dev = ["ruff>=0.5", "mypy>=1.10", "pytest>=8.0"]
+
+[project.scripts]
+stereohand-board = "stereohand.board:_cli"
 
 [project.urls]
 Homepage = "https://github.com/NavehBrenner/stereohand"
