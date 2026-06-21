@@ -18,6 +18,7 @@ consumes. Calibration is valid only until the rig is physically disturbed.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict
@@ -258,3 +259,167 @@ def calibrate_from_charuco(
         Q=np.asarray(Q, dtype=np.float64),
         rms=float(rms),
     )
+
+
+def _board_detected(detector: Any, gray: Any, min_corners: int = 6) -> tuple[Any, Any]:
+    """Detect the board in a grayscale frame → (charuco_corners, charuco_ids) or (None, None)."""
+    corners, ids, _, _ = detector.detectBoard(gray)
+    if ids is None or len(ids) < min_corners:
+        return None, None
+    return corners, ids
+
+
+def live_calibrate(
+    left_source: int | str,
+    right_source: int | str,
+    *,
+    spec: CharucoBoardSpec = BOARD,
+    min_pairs: int = 15,
+    auto_capture: bool = False,
+    auto_capture_interval_s: float = 1.0,
+    auto_accept: bool = False,
+    max_rms: float = 1.0,
+    save_path: str | Path | None = None,
+    window: str = "stereohand calibration",
+) -> StereoCalibration:
+    """Interactively calibrate from a live two-camera feed and return the result (cv2-gated).
+
+    Opens both cameras, previews them side by side with live ChArUco detection, and collects
+    board pairs — on **SPACE** (manual) or automatically every ``auto_capture_interval_s`` in
+    ``auto_capture`` mode, but only when the board is seen in *both* views. **ENTER** finishes
+    (auto mode finishes at ``min_pairs``); **Q** aborts. Then it solves via
+    :func:`calibrate_from_charuco` and validates: ``auto_accept`` accepts iff
+    ``rms <= max_rms``; otherwise it shows the RMS and waits for **Y** (accept) / **R** (redo).
+
+    Designed to be called inline right before a tracking loop::
+
+        calib = live_calibrate(0, 1)
+        with StereoHandTracker(calib, ...) as tracker:
+            ...
+
+    Pass ``save_path`` to also persist the calibration. Raises ``RuntimeError`` on abort.
+    """
+    import cv2
+
+    board = make_board(spec)
+    detector = cv2.aruco.CharucoDetector(board)
+    capture_left = cv2.VideoCapture(int(left_source) if str(left_source).isdigit() else left_source)
+    capture_right = cv2.VideoCapture(
+        int(right_source) if str(right_source).isdigit() else right_source
+    )
+    if not (capture_left.isOpened() and capture_right.isOpened()):
+        capture_left.release()
+        capture_right.release()
+        raise RuntimeError("could not open both cameras")
+
+    try:
+        while True:  # one pass = collect → solve → validate; redo loops back
+            left_frames, right_frames = _collect_pairs(
+                cv2,
+                detector,
+                capture_left,
+                capture_right,
+                min_pairs=min_pairs,
+                auto_capture=auto_capture,
+                auto_capture_interval_s=auto_capture_interval_s,
+                window=window,
+            )
+            calibration = calibrate_from_charuco(left_frames, right_frames, spec=spec)
+            if _confirm(cv2, calibration, auto_accept=auto_accept, max_rms=max_rms, window=window):
+                break
+    finally:
+        capture_left.release()
+        capture_right.release()
+        cv2.destroyAllWindows()
+
+    if save_path is not None:
+        calibration.save(save_path)
+    return calibration
+
+
+def _collect_pairs(
+    cv2: Any,
+    detector: Any,
+    capture_left: Any,
+    capture_right: Any,
+    *,
+    min_pairs: int,
+    auto_capture: bool,
+    auto_capture_interval_s: float,
+    window: str,
+) -> tuple[list[Any], list[Any]]:
+    left_frames: list[Any] = []
+    right_frames: list[Any] = []
+    last_auto = 0.0
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    while True:
+        ok_left, frame_left = capture_left.read()
+        ok_right, frame_right = capture_right.read()
+        if not (ok_left and ok_right):
+            continue
+        gray_left = cv2.cvtColor(frame_left, cv2.COLOR_BGR2GRAY)
+        gray_right = cv2.cvtColor(frame_right, cv2.COLOR_BGR2GRAY)
+        corners_left, _ = _board_detected(detector, gray_left)
+        corners_right, _ = _board_detected(detector, gray_right)
+        both = corners_left is not None and corners_right is not None
+
+        for frame, corners in ((frame_left, corners_left), (frame_right, corners_right)):
+            if corners is not None:
+                cv2.aruco.drawDetectedCornersCharuco(frame, corners)
+        preview = cv2.hconcat([frame_left, frame_right])
+        colour = (0, 230, 0) if both else (0, 200, 255)
+        mode = "AUTO" if auto_capture else "SPACE=capture"
+        cv2.putText(
+            preview,
+            f"pairs {len(left_frames)}/{min_pairs}  board:{'BOTH' if both else 'wait'}  "
+            f"{mode}  ENTER=done Q=quit",
+            (12, 28),
+            font,
+            0.7,
+            colour,
+            2,
+        )
+        cv2.imshow(window, preview)
+        key = cv2.waitKey(1) & 0xFF
+
+        now = time.monotonic()
+        capture_now = both and (
+            (auto_capture and now - last_auto >= auto_capture_interval_s) or key == ord(" ")
+        )
+        if capture_now:
+            left_frames.append(gray_left)
+            right_frames.append(gray_right)
+            last_auto = now
+        finished = key in (13, 10) or (auto_capture and len(left_frames) >= min_pairs)
+        if key == ord("q"):
+            raise RuntimeError("calibration aborted")
+        if finished and len(left_frames) >= min_pairs:
+            return left_frames, right_frames
+
+
+def _confirm(
+    cv2: Any, calibration: StereoCalibration, *, auto_accept: bool, max_rms: float, window: str
+) -> bool:
+    if auto_accept:
+        if calibration.rms > max_rms:
+            raise RuntimeError(f"calibration RMS {calibration.rms:.3f} px exceeds max {max_rms}")
+        return True
+    panel = np.zeros((140, 640, 3), dtype=np.uint8)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(
+        panel,
+        f"RMS = {calibration.rms:.3f} px   baseline = {calibration.baseline * 100:.1f} cm",
+        (12, 50),
+        font,
+        0.7,
+        (255, 255, 255),
+        2,
+    )
+    cv2.putText(panel, "Y = accept    R = redo", (12, 100), font, 0.7, (0, 230, 0), 2)
+    cv2.imshow(window, panel)
+    while True:
+        key = cv2.waitKey(0) & 0xFF
+        if key == ord("y"):
+            return True
+        if key == ord("r"):
+            return False

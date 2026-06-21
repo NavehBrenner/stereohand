@@ -18,7 +18,7 @@ Typical use::
 from __future__ import annotations
 
 from stereohand.board import BOARD, CharucoBoardSpec, make_board, render_board
-from stereohand.calibration import StereoCalibration, calibrate_from_charuco
+from stereohand.calibration import StereoCalibration, calibrate_from_charuco, live_calibrate
 from stereohand.capture import StereoCapture
 from stereohand.landmarker import HandLandmarker, HandLandmarks2D
 from stereohand.tracker import StereoHandReading, StereoHandTracker
@@ -32,6 +32,7 @@ __all__ = [
     "StereoHandReading",
     "StereoCalibration",
     "calibrate_from_charuco",
+    "live_calibrate",
     "StereoCapture",
     "HandLandmarker",
     "HandLandmarks2D",

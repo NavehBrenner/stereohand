@@ -15,7 +15,7 @@ import argparse
 
 import matplotlib.pyplot as plt
 
-from stereohand import StereoCalibration, StereoHandTracker
+from stereohand import StereoCalibration, StereoHandTracker, live_calibrate
 
 # MediaPipe's 21-landmark hand skeleton (bone connectivity), for drawing only.
 HAND_CONNECTIONS = [
@@ -46,14 +46,24 @@ _WRIST = 0
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--calib", required=True, help="stereo_calib.json from calibrate.py")
+    parser.add_argument("--calib", default="stereo_calib.json", help="calibration file to load")
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="run calibration inline first (and save to --calib), instead of loading it",
+    )
     parser.add_argument("--left", default="0", help="left camera index or stream URL")
     parser.add_argument("--right", default="2", help="right camera index or stream URL")
     args = parser.parse_args()
 
-    calib = StereoCalibration.load(args.calib)
     left = int(args.left) if args.left.isdigit() else args.left
     right = int(args.right) if args.right.isdigit() else args.right
+    # Calibration baked into the same run, or loaded from a previous session.
+    calib = (
+        live_calibrate(left, right, save_path=args.calib)
+        if args.calibrate
+        else StereoCalibration.load(args.calib)
+    )
 
     plt.ion()
     figure = plt.figure("stereohand — metric 3D hand")
