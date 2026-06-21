@@ -44,10 +44,12 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# cv2 / mediapipe ship no type stubs; don't fail on their missing types.
+# Treat cv2 / mediapipe as untyped: their bundled stubs are too strict for the dynamic
+# runtime API (overloaded signatures, optional out-params), so skip analyzing them.
 [[tool.mypy.overrides]]
-module = ["cv2.*", "mediapipe.*"]
+module = ["cv2", "cv2.*", "mediapipe", "mediapipe.*", "PIL", "PIL.*"]
 ignore_missing_imports = true
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
