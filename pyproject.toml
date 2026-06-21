@@ -23,6 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["ruff>=0.5", "mypy>=1.10", "pytest>=8.0"]
+demo = ["matplotlib>=3.8"]
 
 [project.scripts]
 stereohand-board = "stereohand.board:_cli"
