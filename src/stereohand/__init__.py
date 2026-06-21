@@ -24,7 +24,7 @@ from stereohand.landmarker import HandLandmarker, HandLandmarks2D
 from stereohand.tracker import StereoHandReading, StereoHandTracker
 from stereohand.triangulation import triangulate_points
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"
 
 __all__ = [
     "__version__",
