@@ -147,10 +147,10 @@ class StereoCalibration:
 
     def rectify_pair(
         self,
-        left: FloatArray,
-        right: FloatArray,
+        left: NDArray[Any],
+        right: NDArray[Any],
         maps: tuple[FloatArray, FloatArray, FloatArray, FloatArray] | None = None,
-    ) -> tuple[FloatArray, FloatArray]:
+    ) -> tuple[NDArray[Any], NDArray[Any]]:
         """Undistort + rectify a left/right image pair (pass cached ``maps`` to avoid rebuild)."""
         import cv2
 
