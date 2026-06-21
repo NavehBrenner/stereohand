@@ -19,7 +19,7 @@ _cv2_spec = importlib.util.find_spec("cv2")
 if _cv2_spec and _cv2_spec.origin:
     Path(_cv2_spec.origin).parent.joinpath("qt", "fonts").mkdir(parents=True, exist_ok=True)
 
-from stereohand import live_calibrate
+from stereohand import live_calibrate  # noqa: E402  (after cv2-Qt font path fix above)
 
 
 def main() -> None:

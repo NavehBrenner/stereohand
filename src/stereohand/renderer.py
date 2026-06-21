@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import collections
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import cv2
@@ -47,27 +47,29 @@ class RenderConfig:
 #   display_x = cam_x   (left-right)
 #   display_y = cam_z   (depth, into screen — dropped by the ortho front view)
 #   display_z = -cam_y  (up: cam y is down, so negate)
-_R = np.array([
-    [1.,  0.,  0.],
-    [0.,  0.,  1.],
-    [0., -1.,  0.],
-])
+_R = np.array(
+    [
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, -1.0, 0.0],
+    ]
+)
 
 # Finger groups — exact copy from handpose3d's show_3d_hands.py.
 _FINGERS = [
     [[0, 17], [17, 18], [18, 19], [19, 20]],  # pinky
     [[0, 13], [13, 14], [14, 15], [15, 16]],  # ring
-    [[0,  9], [ 9, 10], [10, 11], [11, 12]],  # middle
-    [[0,  5], [ 5,  6], [ 6,  7], [ 7,  8]],  # index
-    [[0,  1], [ 1,  2], [ 2,  3], [ 3,  4]],  # thumb
+    [[0, 9], [9, 10], [10, 11], [11, 12]],  # middle
+    [[0, 5], [5, 6], [6, 7], [7, 8]],  # index
+    [[0, 1], [1, 2], [2, 3], [3, 4]],  # thumb
 ]
 # handpose3d colors in BGR; its "black" index finger → white so it shows on black.
 _FINGER_COLORS_BGR = [
-    (0,   0, 255),    # pinky  → red
-    (255, 0,   0),    # ring   → blue
-    (0, 200,   0),    # middle → green
+    (0, 0, 255),  # pinky  → red
+    (255, 0, 0),  # ring   → blue
+    (0, 200, 0),  # middle → green
     (240, 240, 240),  # index  → white (handpose3d uses black on a white bg)
-    (0, 165, 255),    # thumb  → orange
+    (0, 165, 255),  # thumb  → orange
 ]
 
 # Palm-center landmark index: MediaPipe index 9 = middle-finger MCP, the geometric
@@ -111,23 +113,37 @@ def _render_hand_3d(
     # --- World-origin axes (always drawn, even when no hand) ---
     L = int(_SCALE * _AXIS_LEN_M)
     # X axis → red (right, or left when mirrored)
-    cv2.arrowedLine(canvas, (cx, cy), (cx + xsign * L, cy),
-                    (0, 0, 255), 2, cv2.LINE_AA, tipLength=0.15)
-    cv2.putText(canvas, "X", (cx + xsign * L + xsign * 4, cy + 5),
-                _HUD_FONT, 0.45, (0, 0, 255), 1, cv2.LINE_AA)
+    cv2.arrowedLine(
+        canvas, (cx, cy), (cx + xsign * L, cy), (0, 0, 255), 2, cv2.LINE_AA, tipLength=0.15
+    )
+    cv2.putText(
+        canvas,
+        "X",
+        (cx + xsign * L + xsign * 4, cy + 5),
+        _HUD_FONT,
+        0.45,
+        (0, 0, 255),
+        1,
+        cv2.LINE_AA,
+    )
     # Z axis → blue (up, since we map cam -Y → display Z → screen up)
-    cv2.arrowedLine(canvas, (cx, cy), (cx, cy - L),
-                    (255, 0, 0), 2, cv2.LINE_AA, tipLength=0.15)
-    cv2.putText(canvas, "Z", (cx + 4, cy - L - 6),
-                _HUD_FONT, 0.45, (255, 0, 0), 1, cv2.LINE_AA)
+    cv2.arrowedLine(canvas, (cx, cy), (cx, cy - L), (255, 0, 0), 2, cv2.LINE_AA, tipLength=0.15)
+    cv2.putText(canvas, "Z", (cx + 4, cy - L - 6), _HUD_FONT, 0.45, (255, 0, 0), 1, cv2.LINE_AA)
     # Y axis → green (into screen; show as a small dot / circle since ortho front view)
     cv2.circle(canvas, (cx, cy), 4, (0, 200, 0), -1, cv2.LINE_AA)
-    cv2.putText(canvas, "Y", (cx - 16, cy - 8),
-                _HUD_FONT, 0.45, (0, 200, 0), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "Y", (cx - 16, cy - 8), _HUD_FONT, 0.45, (0, 200, 0), 1, cv2.LINE_AA)
 
     if pts is None:
-        cv2.putText(canvas, "no hand (must be visible in both views)", (20, cy + 60),
-                    cv2.FONT_HERSHEY_DUPLEX, 0.7, (90, 90, 90), 1, cv2.LINE_AA)
+        cv2.putText(
+            canvas,
+            "no hand (must be visible in both views)",
+            (20, cy + 60),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.7,
+            (90, 90, 90),
+            1,
+            cv2.LINE_AA,
+        )
     else:
         # Front view: screen x = display-x (right), screen y = -display-z (up; cv2 y down).
         px = (cx + xsign * _SCALE * pts[:, 0]).astype(int)
@@ -141,16 +157,32 @@ def _render_hand_3d(
 
     # --- HUD: FPS (top-left) ---
     if fps is not None:
-        cv2.putText(canvas, f"FPS: {fps:.1f}", (12, 28),
-                    _HUD_FONT, _HUD_SCALE, _HUD_COLOR, _HUD_THICK, cv2.LINE_AA)
+        cv2.putText(
+            canvas,
+            f"FPS: {fps:.1f}",
+            (12, 28),
+            _HUD_FONT,
+            _HUD_SCALE,
+            _HUD_COLOR,
+            _HUD_THICK,
+            cv2.LINE_AA,
+        )
 
     # --- HUD: palm-centre world XYZ (top-right) ---
     if palm_xyz is not None:
         x, y, z = palm_xyz
-        txt = f"Palm  X:{x*100:+6.1f}  Y:{y*100:+6.1f}  Z:{z*100:+6.1f}  cm"
+        txt = f"Palm  X:{x * 100:+6.1f}  Y:{y * 100:+6.1f}  Z:{z * 100:+6.1f}  cm"
         (tw, _), _ = cv2.getTextSize(txt, _HUD_FONT, _HUD_SCALE, _HUD_THICK)
-        cv2.putText(canvas, txt, (width - tw - 12, 28),
-                    _HUD_FONT, _HUD_SCALE, _HUD_COLOR, _HUD_THICK, cv2.LINE_AA)
+        cv2.putText(
+            canvas,
+            txt,
+            (width - tw - 12, 28),
+            _HUD_FONT,
+            _HUD_SCALE,
+            _HUD_COLOR,
+            _HUD_THICK,
+            cv2.LINE_AA,
+        )
 
     return canvas
 
