@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stereohand"
+version = "0.1.0.dev0"
+description = "Two webcams to metric 3D hand landmarks: ChArUco stereo calibration + MediaPipe Tasks + linear-DLT triangulation."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Naveh Brenner", email = "navegerc@gmail.com" }]
+keywords = ["hand-tracking", "mediapipe", "stereo", "triangulation", "3d-pose", "opencv"]
+dependencies = [
+    "numpy>=1.26",
+    # opencv-contrib (not plain opencv-python): we need cv2.aruco for ChArUco.
+    "opencv-contrib-python>=4.9",
+    # Modern Tasks HandLandmarker API (not the legacy mediapipe.solutions.hands).
+    "mediapipe>=0.10.35",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.5", "mypy>=1.10", "pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://github.com/NavehBrenner/stereohand"
+Issues = "https://github.com/NavehBrenner/stereohand/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stereohand"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# cv2 / mediapipe ship no type stubs; don't fail on their missing types.
+[[tool.mypy.overrides]]
+module = ["cv2.*", "mediapipe.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

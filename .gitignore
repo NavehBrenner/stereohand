@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# venv / uv (library: don't pin a lockfile)
+.venv/
+venv/
+uv.lock
+
+# Local calibration / model artifacts (not checked in)
+stereo_calib.json
+*.task
+
+# OS
+.DS_Store
