@@ -2,8 +2,6 @@
 
 **Two webcams → metric 3D hand landmarks, in real time.**
 
-[![CI](https://github.com/NavehBrenner/stereohand/actions/workflows/ci.yml/badge.svg)](https://github.com/NavehBrenner/stereohand/actions/workflows/ci.yml)
-
 Monocular [MediaPipe](https://ai.google.dev/edge/mediapipe) gives you 21 hand landmarks but
 no real depth — its `z` is a relative guess. `stereohand` adds a second camera and recovers
 **metric** 3D: synchronized dual-webcam capture → one-time **ChArUco** stereo calibration →
