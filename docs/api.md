@@ -37,6 +37,7 @@ cfg = RenderConfig(mirror=True, smooth=0.3)
 |---|---|---|---|
 | `mirror` | `bool` | `False` | Flip the view horizontally so it acts like a mirror — your right hand appears on the right side of the screen. Camera feeds are flipped and swapped; the 3D skeleton's X axis is negated. |
 | `smooth` | `float` | `0.5` | EMA (exponential moving average) alpha for temporal smoothing of the 3D landmarks. `1.0` = no smoothing (raw values), `0.1` = very smooth (more lag). `0.5` is a good balance of low jitter and low latency. |
+| `recenter` | `bool` | `False` | Enable the hold-palm-open recenter gesture. Hold an open palm square to a camera and still for 3 s (an on-screen "Calibrating..." countdown runs); the current palm position then becomes the world origin `(0, 0, 0)` — both the HUD XYZ readout and where the hand renders (now centred). Re-arms after you drop the pose. |
 
 ## Programmatic usage with rendering
 
