@@ -32,6 +32,11 @@ def main() -> None:
     parser.add_argument(
         "--mirror", action="store_true", help="flip the view horizontally (mirror mode)"
     )
+    parser.add_argument(
+        "--recenter",
+        action="store_true",
+        help="hold an open palm (square to a camera) still for 3 s to re-zero the origin",
+    )
     args = parser.parse_args()
 
     left = int(args.left) if args.left.isdigit() else args.left
@@ -42,7 +47,7 @@ def main() -> None:
         else StereoCalibration.load(args.calib)
     )
 
-    render_cfg = RenderConfig(mirror=args.mirror, smooth=args.smooth)
+    render_cfg = RenderConfig(mirror=args.mirror, smooth=args.smooth, recenter=args.recenter)
 
     with StereoHandTracker.open(
         calib,

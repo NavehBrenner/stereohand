@@ -11,12 +11,15 @@ pull in cv2 at import time.
 from __future__ import annotations
 
 import collections
+import math
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
+
+from stereohand.landmarker import _BLUE, _GREEN, _PEACH, _PURPLE, _YELLOW
 
 if TYPE_CHECKING:
     from stereohand.landmarker import HandLandmarks2D
@@ -31,12 +34,15 @@ class RenderConfig:
     """Configuration knobs for the live visualisation window.
 
     Attributes:
-        mirror:  Flip the view horizontally so it acts like a mirror.
-        smooth:  EMA alpha for temporal smoothing (1 = no smoothing, 0.1 = very smooth).
+        mirror:   Flip the view horizontally so it acts like a mirror.
+        smooth:   EMA alpha for temporal smoothing (1 = no smoothing, 0.1 = very smooth).
+        recenter: Enable the hold-palm-open gesture that re-zeros the world origin to the
+                  current palm position (see :data:`_RECENTER_HOLD_S`).
     """
 
     mirror: bool = False
     smooth: float = 0.5
+    recenter: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -63,18 +69,51 @@ _FINGERS = [
     [[0, 5], [5, 6], [6, 7], [7, 8]],  # index
     [[0, 1], [1, 2], [2, 3], [3, 4]],  # thumb
 ]
-# handpose3d colors in BGR; its "black" index finger → white so it shows on black.
+# Colors matched to MediaPipe's get_default_hand_connections_style() (reused from the 2D
+# landmarker) so the 3D skeleton reads the same as the camera-feed overlay.  Order = _FINGERS.
 _FINGER_COLORS_BGR = [
-    (0, 0, 255),  # pinky  → red
-    (255, 0, 0),  # ring   → blue
-    (0, 200, 0),  # middle → green
-    (240, 240, 240),  # index  → white (handpose3d uses black on a white bg)
-    (0, 165, 255),  # thumb  → orange
+    _BLUE,  # pinky
+    _GREEN,  # ring
+    _YELLOW,  # middle
+    _PURPLE,  # index
+    _PEACH,  # thumb
 ]
 
 # Palm-center landmark index: MediaPipe index 9 = middle-finger MCP, the geometric
 # centre of the palm.  Index 0 is the wrist, which sits at the base.
 _PALM_CENTER_IDX = 9
+
+# Recenter gesture: hold an open palm, square to the camera and still, for this long to
+# re-zero the world origin to the current palm position.
+_RECENTER_HOLD_S = 3.0
+_RECENTER_MOVE_TOL_M = 0.02  # palm may drift this much (2 cm) and still count as "still"
+# A recenter hold survives brief MediaPipe dropouts: only a sustained loss (hand missing in
+# >10% of frames over the last 100 ms) counts as the hand leaving. This also rejects the odd
+# spurious single-frame detection during a real absence.
+_PRESENCE_WINDOW_S = 0.2
+_PRESENCE_MIN_FRAC = 0.2
+_FINGER_TIPS = (8, 12, 16, 20)  # index, middle, ring, pinky tips (skip thumb)
+_FINGER_MCPS = (5, 9, 13, 17)  # their knuckles
+
+
+def _palm_open_facing(pts: np.ndarray) -> bool:
+    """True when the hand is open and roughly square to the camera — the recenter pose.
+
+    ``pts`` is the raw ``(21, 3)`` metric hand in the left-camera frame.
+    """
+    wrist = pts[0]
+    extended = sum(
+        np.linalg.norm(pts[tip] - wrist) > 1.4 * np.linalg.norm(pts[mcp] - wrist)
+        for tip, mcp in zip(_FINGER_TIPS, _FINGER_MCPS, strict=True)
+    )
+    if extended < 3:
+        return False
+    normal = np.cross(pts[5] - wrist, pts[17] - wrist)
+    norm = float(np.linalg.norm(normal))
+    # ponytail: "square to camera" (palm-plane normal ≈ camera z-axis) — this can't tell
+    # palm from back-of-hand. Add a handedness sign check if back-of-hand triggers it.
+    return norm > 0 and abs(normal[2]) > 0.7 * norm
+
 
 # Metres → pixels for the 3D panel.  Hand ≈15 cm; ~1400 px/m fills a 480 px panel.
 _SCALE = 1400.0
@@ -102,6 +141,7 @@ def _render_hand_3d(
     mirror: bool = False,
     fps: float | None = None,
     palm_xyz: np.ndarray | None = None,
+    calib_msg: str | None = None,
 ) -> np.ndarray:
     """Orthographic front view with fixed world axes; the hand moves in world space."""
     canvas = np.zeros((height, width, 3), np.uint8)
@@ -184,6 +224,20 @@ def _render_hand_3d(
             cv2.LINE_AA,
         )
 
+    # --- HUD: recenter calibration prompt / countdown (top-centre, prominent) ---
+    if calib_msg:
+        (tw, _), _ = cv2.getTextSize(calib_msg, cv2.FONT_HERSHEY_DUPLEX, 1.0, 2)
+        cv2.putText(
+            canvas,
+            calib_msg,
+            ((width - tw) // 2, 56),
+            cv2.FONT_HERSHEY_DUPLEX,
+            1.0,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
     return canvas
 
 
@@ -205,6 +259,13 @@ class HandRenderer:
         self._smoothed: np.ndarray | None = None
         self._fps_ts: collections.deque[float] = collections.deque(maxlen=30)
         self._fps: float | None = None
+        # Recenter gesture state.
+        self._origin = np.zeros(3)
+        self._hold_anchor: np.ndarray | None = None  # palm position the current hold started at
+        self._hold_start: float | None = None  # monotonic time the hold began
+        self._recentered = False  # latched after a successful recenter until the pose is released
+        self._calib_msg: str | None = None
+        self._presence: collections.deque[tuple[float, bool]] = collections.deque()
         cv2.namedWindow(_WIN_NAME, cv2.WINDOW_NORMAL)
 
     # -- public interface ---------------------------------------------------
@@ -250,16 +311,33 @@ class HandRenderer:
         # 3D skeleton.
         pts = None
         palm_xyz: np.ndarray | None = None
+        has_hand = present and landmarks_3d is not None
+        self._presence.append((now, has_hand))
+        while self._presence and now - self._presence[0][0] > _PRESENCE_WINDOW_S:
+            self._presence.popleft()
         if present and landmarks_3d is not None:
             alpha = self._cfg.smooth
             if self._smoothed is None:
                 self._smoothed = landmarks_3d.copy()
             else:
                 self._smoothed = alpha * landmarks_3d + (1 - alpha) * self._smoothed
-            pts = (_R @ self._smoothed.T).T
-            palm_xyz = self._smoothed[_PALM_CENTER_IDX]
+            if self._cfg.recenter:
+                self._update_recenter(now)
+            centered = self._smoothed - self._origin
+            pts = (_R @ centered.T).T
+            palm_xyz = centered[_PALM_CENTER_IDX]
+        elif self._cfg.recenter and self._smoothed is not None and not self._recently_absent():
+            # Brief MediaPipe dropout — hold the last pose, countdown and origin alive so a
+            # single missed frame doesn't restart the recenter timer.
+            centered = self._smoothed - self._origin
+            pts = (_R @ centered.T).T
+            palm_xyz = centered[_PALM_CENTER_IDX]
         else:
             self._smoothed = None
+            self._hold_start = None
+            self._hold_anchor = None
+            self._recentered = False
+            self._calib_msg = None
 
         hand_panel = _render_hand_3d(
             pts,
@@ -267,6 +345,7 @@ class HandRenderer:
             mirror=self._cfg.mirror,
             fps=self._fps,
             palm_xyz=palm_xyz,
+            calib_msg=self._calib_msg,
         )
 
         cv2.imshow(_WIN_NAME, cv2.vconcat([cam_panel, hand_panel]))
@@ -275,6 +354,51 @@ class HandRenderer:
         if cv2.getWindowProperty(_WIN_NAME, cv2.WND_PROP_VISIBLE) < 1:
             return False
         return True
+
+    def _recently_absent(self) -> bool:
+        """True when the hand was missing for >10% of frames in the last 100 ms.
+
+        Distinguishes a real hand loss (reset the recenter hold) from a single-frame
+        MediaPipe miss (ignore). Call after the current frame's presence is recorded.
+        """
+        if not self._presence:
+            return True
+        present = sum(seen for _, seen in self._presence)
+        return present / len(self._presence) < _PRESENCE_MIN_FRAC
+
+    def _update_recenter(self, now: float) -> None:
+        """Advance the hold-palm-open recenter gesture; sets ``self._origin`` on success.
+
+        Assumes ``self._smoothed`` is set. Holding an open palm, square to the camera and
+        still for :data:`_RECENTER_HOLD_S` seconds re-zeros the origin to the palm. The
+        result latches until the pose is released, so it fires once per hold, not every
+        frame.
+        """
+        assert self._smoothed is not None
+        palm = self._smoothed[_PALM_CENTER_IDX]
+        if not _palm_open_facing(self._smoothed):
+            self._hold_start = None
+            self._hold_anchor = None
+            self._recentered = False  # pose released → re-arm for the next hold
+            self._calib_msg = None
+            return
+        if self._recentered:
+            self._calib_msg = "Recentered"
+            return
+        moved = (
+            self._hold_anchor is not None
+            and float(np.linalg.norm(palm - self._hold_anchor)) > _RECENTER_MOVE_TOL_M
+        )
+        if self._hold_start is None or moved:
+            self._hold_anchor = palm.copy()
+            self._hold_start = now
+        remaining = _RECENTER_HOLD_S - (now - self._hold_start)
+        if remaining <= 0:
+            self._origin = palm.copy()
+            self._recentered = True
+            self._calib_msg = "Recentered"
+        else:
+            self._calib_msg = f"Calibrating... {math.ceil(remaining)}"
 
     def destroy(self) -> None:
         cv2.destroyAllWindows()
