@@ -64,7 +64,8 @@ def _make_handler(allowed: set[int], jpeg_quality: int) -> type[BaseHTTPRequestH
             if camera is None:
                 self.send_error(404, f"unknown camera path {self.path!r}")
                 return
-            capture = cv2.VideoCapture(camera)
+            # DirectShow opens in <1s; the default MSMF backend stalls ~10s per cam on Windows.
+            capture = cv2.VideoCapture(camera, cv2.CAP_DSHOW)
             if not capture.isOpened():
                 self.send_error(500, f"could not open camera {camera}")
                 return
