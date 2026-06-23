@@ -280,12 +280,12 @@ class HandRenderer:
         landmarks_2d: tuple[HandLandmarks2D | None, HandLandmarks2D | None] | None,
         landmarks_3d: np.ndarray | None,
         present: bool,
-    ) -> bool:
-        """Render one composite frame.  Returns ``False`` when the window should close."""
+    ) -> None:
+        """Draw one composite frame. Call only on new data; :meth:`poll` keeps the window live."""
         from stereohand.landmarker import draw_landmarks_on_frame
 
         if frames is None:
-            return cv2.waitKey(10) & 0xFF not in (ord("q"), 27)
+            return
 
         fl, fr = frames
         if landmarks_2d is not None:
@@ -304,7 +304,7 @@ class HandRenderer:
         else:
             cam_panel = cv2.hconcat([fl, fr])
 
-        # FPS.
+        # FPS — render rate, which run() syncs to the data-arrival rate.
         now = time.monotonic()
         self._fps_ts.append(now)
         if len(self._fps_ts) >= 2:
@@ -352,11 +352,14 @@ class HandRenderer:
         )
 
         cv2.imshow(_WIN_NAME, cv2.vconcat([cam_panel, hand_panel]))
+
+    def poll(self) -> bool:
+        """Pump the cv2 GUI once (repaint, events). Returns ``False`` when the user closes
+        the window / presses 'q' — call every loop iteration to stay responsive between draws.
+        """
         if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
             return False
-        if cv2.getWindowProperty(_WIN_NAME, cv2.WND_PROP_VISIBLE) < 1:
-            return False
-        return True
+        return cv2.getWindowProperty(_WIN_NAME, cv2.WND_PROP_VISIBLE) >= 1
 
     def _recently_absent(self) -> bool:
         """True when the hand was missing for >10% of frames in the last 100 ms.

@@ -97,6 +97,7 @@ class StereoHandTracker:
         self._renderer = renderer
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._reading_ready = threading.Event()  # set on each publish; wakes the render loop
         self._thread: threading.Thread | None = None
         # Landmark both views concurrently: each view has its own detector, so the two
         # ~20 ms CPU inferences overlap instead of summing (≈25→40 fps on the step thread).
@@ -185,6 +186,7 @@ class StereoHandTracker:
     def _publish(self, reading: StereoHandReading) -> StereoHandReading:
         with self._lock:
             self._latest = reading
+        self._reading_ready.set()
         return reading
 
     def read(self) -> StereoHandReading:
@@ -218,8 +220,8 @@ class StereoHandTracker:
 
     # -- Visualisation (main-thread) ----------------------------------------
 
-    def render_step(self) -> bool:
-        """Drive the renderer for one frame.  Returns ``False`` when the window closes.
+    def render_step(self) -> None:
+        """Draw the latest state once. Pair with the renderer's ``poll()`` for responsiveness.
 
         Must be called from the **main thread** (cv2 GUI requirement).  The background
         tracker thread keeps running; this just visualises the latest state.
@@ -227,7 +229,7 @@ class StereoHandTracker:
         if self._renderer is None:
             raise RuntimeError("render_step() requires render=True in StereoHandTracker.open()")
         reading = self.read()  # also starts the background thread on first call
-        return self._renderer.step(
+        self._renderer.step(
             frames=self.last_processed_frames,
             landmarks_2d=self.last_landmark_2d,
             landmarks_3d=reading.landmarks if reading.present else None,
@@ -240,8 +242,19 @@ class StereoHandTracker:
         Convenience wrapper around :meth:`render_step` — call this from ``main()`` and
         forget about the loop.
         """
-        while self.render_step():
-            pass
+        if self._renderer is None:
+            raise RuntimeError("run() requires render=True in StereoHandTracker.open()")
+        renderer = self._renderer
+        self.read()  # start the background thread so publishes (and the wake event) flow
+        while True:
+            # Redraw only on a new reading; poll() pumps the cv2 GUI every iteration so the
+            # window stays responsive (repaint, close/quit) even when the feed stalls. The
+            # wait timeout bounds that polling rate when no new frame arrives.
+            if self._reading_ready.wait(timeout=0.1):
+                self._reading_ready.clear()
+                self.render_step()
+            if not renderer.poll():
+                break
 
     def close(self) -> None:
         self._stop.set()
