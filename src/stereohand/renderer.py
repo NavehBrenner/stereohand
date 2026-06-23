@@ -46,13 +46,14 @@ class RenderConfig:
 
 
 # ---------------------------------------------------------------------------
-# 3D rendering constants — mirrors handpose3d (TemugeB/handpose3d).
+# 3D rendering constants
 # ---------------------------------------------------------------------------
 
-# Map OpenCV camera coords (x=right, y=down, z=forward) to display (z=up).
-#   display_x = cam_x   (left-right)
-#   display_y = cam_z   (depth, into screen — dropped by the ortho front view)
-#   display_z = -cam_y  (up: cam y is down, so negate)
+# Map OpenCV camera coords (x=right, y=down, z=forward) to a Z-up world.
+#   world_x = cam_x   (left-right)
+#   world_y = cam_z   (depth, into screen)
+#   world_z = -cam_y  (up: cam y is down, so negate)
+# The orbiting projection below expects this Z-up world (azimuth turns around Z).
 _R = np.array(
     [
         [1.0, 0.0, 0.0],
@@ -87,11 +88,10 @@ _PALM_CENTER_IDX = 9
 # re-zero the world origin to the current palm position.
 _RECENTER_HOLD_S = 3.0
 _RECENTER_MOVE_TOL_M = 0.02  # palm may drift this much (2 cm) and still count as "still"
-# A recenter hold survives brief MediaPipe dropouts: only a sustained loss (hand missing in
-# >10% of frames over the last 100 ms) counts as the hand leaving. This also rejects the odd
-# spurious single-frame detection during a real absence.
-_PRESENCE_WINDOW_S = 0.2
-_PRESENCE_MIN_FRAC = 0.2
+# A recenter hold survives brief MediaPipe dropouts: hold the last pose (and keep the
+# countdown running) until the hand has been gone this long. Wall-clock based, so the
+# tolerance is the same at 10 fps or 30 fps — a longer gap counts as the hand leaving.
+_DROPOUT_GRACE_S = 0.4
 _FINGER_TIPS = (8, 12, 16, 20)  # index, middle, ring, pinky tips (skip thumb)
 _FINGER_MCPS = (5, 9, 13, 17)  # their knuckles
 
@@ -115,15 +115,54 @@ def _palm_open_facing(pts: np.ndarray) -> bool:
     return norm > 0 and abs(normal[2]) > 0.7 * norm
 
 
-# Metres → pixels for the 3D panel.  Hand ≈15 cm; ~1400 px/m fills a 480 px panel.
-_SCALE = 1400.0
-_AXIS_LEN_M = 0.05  # 5 cm reference axes at the world origin
+# Light background, gray joints and red/blue/black axis gizmo — matches the reference
+# viewer in project-wiki/raw/visualize_3d_pose_rt.py.
+_BG_COLOR = (240, 240, 240)
+_JOINT_COLOR = (80, 80, 80)
+_AXIS_COLORS = [
+    (0, 0, 255),  # X → red
+    (255, 0, 0),  # Y → blue
+    (0, 0, 0),  # Z → black
+]
+_AXIS_LEN_M = 0.12  # reference axes at the world origin (display units, tune to taste)
+# Shrink the hand and pull it proportionally toward the origin so it reads as a small shape
+# next to the (larger) axis gizmo instead of floating far away. Display-only — the Palm XYZ
+# HUD still reports true metric position. Lower = smaller/closer.
+_HAND_DISPLAY_SCALE = 0.4
 
-# HUD styling.
+# Orbit camera defaults. Zoom is px-per-metre; hand ≈15 cm, ~1400 px/m fills the panel.
+_DEFAULT_AZIM = math.radians(45.0)
+_DEFAULT_ELEV = math.radians(25.0)
+_DEFAULT_ZOOM = 1400.0
+_ZOOM_MIN, _ZOOM_MAX = 300.0, 8000.0
+
+# HUD styling — dark text reads on the light background.
 _HUD_FONT = cv2.FONT_HERSHEY_SIMPLEX
 _HUD_SCALE = 0.6
-_HUD_COLOR = (200, 200, 200)
+_HUD_COLOR = (60, 60, 60)
 _HUD_THICK = 1
+
+
+def _project(
+    pt: np.ndarray, width: int, height: int, azim: float, elev: float, zoom: float, xsign: int
+) -> tuple[int, int]:
+    """Weak-perspective (orthographic + zoom) projection of a Z-up world point, with orbit.
+
+    The camera orbits the world origin by ``azim`` (around Z) then ``elev`` (tilt around
+    X'), exactly as in the reference viewer. ``xsign`` flips horizontally for mirror mode.
+    """
+    ca, sa = math.cos(azim), math.sin(azim)
+    ce, se = math.cos(elev), math.sin(elev)
+    # Azimuth around Z-up.
+    x1 = ca * pt[0] + sa * pt[1]
+    y1 = -sa * pt[0] + ca * pt[1]
+    z1 = pt[2]
+    # Elevation tilt around the new X axis (only z2 is needed for the screen-y).
+    z2 = se * y1 + ce * z1
+    sx = int(width / 2 + xsign * x1 * zoom)
+    sy = int(height / 2 - z2 * zoom)
+    return sx, sy
+
 
 _WIN_NAME = "stereohand"
 
@@ -139,42 +178,38 @@ def _render_hand_3d(
     height: int = 480,
     *,
     mirror: bool = False,
+    azim: float = _DEFAULT_AZIM,
+    elev: float = _DEFAULT_ELEV,
+    zoom: float = _DEFAULT_ZOOM,
     fps: float | None = None,
     palm_xyz: np.ndarray | None = None,
     calib_msg: str | None = None,
 ) -> np.ndarray:
-    """Orthographic front view with fixed world axes; the hand moves in world space."""
-    canvas = np.zeros((height, width, 3), np.uint8)
-    cx, cy = width // 2, height // 2
+    """Orbiting weak-perspective view of the world; drag to orbit, scroll to zoom.
+
+    Reproduces the reference viewer (Z-up world, orbit camera, light background, gray
+    joints, red/blue/black axis gizmo). Finger colours are stereohand's, not the
+    reference's.
+    """
+    canvas = np.full((height, width, 3), _BG_COLOR, np.uint8)
+    cy = height // 2
 
     # Sign for horizontal direction: mirroring negates X on screen.
     xsign = -1 if mirror else 1
 
+    def proj(world_pt: np.ndarray) -> tuple[int, int]:
+        return _project(world_pt, width, height, azim, elev, zoom, xsign)
+
     # --- World-origin axes (always drawn, even when no hand) ---
-    # Labelled in the *camera* frame (x=right, y=down, z=depth) so the arrows match the
-    # Palm X/Y/Z HUD readout and the metric landmarks consumers receive. The ortho front
-    # view shows X (horizontal) and Y (vertical); Z (depth) points into the screen.
-    L = int(_SCALE * _AXIS_LEN_M)
-    # X axis → red: camera +x = right (or left when mirrored)
-    cv2.arrowedLine(
-        canvas, (cx, cy), (cx + xsign * L, cy), (0, 0, 255), 2, cv2.LINE_AA, tipLength=0.15
-    )
-    cv2.putText(
-        canvas,
-        "X",
-        (cx + xsign * L + xsign * 4, cy + 5),
-        _HUD_FONT,
-        0.45,
-        (0, 0, 255),
-        1,
-        cv2.LINE_AA,
-    )
-    # Y axis → green: camera +y = down (screen-down, since the view maps -cam_y to up)
-    cv2.arrowedLine(canvas, (cx, cy), (cx, cy + L), (0, 200, 0), 2, cv2.LINE_AA, tipLength=0.15)
-    cv2.putText(canvas, "Y", (cx + 4, cy + L + 14), _HUD_FONT, 0.45, (0, 200, 0), 1, cv2.LINE_AA)
-    # Z axis → blue: camera +z = depth, into the screen (ortho front view ⇒ a dot)
-    cv2.circle(canvas, (cx, cy), 4, (255, 0, 0), -1, cv2.LINE_AA)
-    cv2.putText(canvas, "Z", (cx - 16, cy - 8), _HUD_FONT, 0.45, (255, 0, 0), 1, cv2.LINE_AA)
+    origin = proj(np.zeros(3))
+    axis_ends = [
+        np.array([_AXIS_LEN_M, 0.0, 0.0]),  # X
+        np.array([0.0, _AXIS_LEN_M, 0.0]),  # Y
+        np.array([0.0, 0.0, _AXIS_LEN_M]),  # Z
+    ]
+    for label, end, color in zip("XYZ", axis_ends, _AXIS_COLORS, strict=True):
+        cv2.line(canvas, origin, proj(end), color, 2, cv2.LINE_AA)
+        cv2.putText(canvas, label, proj(end * 1.25), _HUD_FONT, 0.45, color, 1, cv2.LINE_AA)
 
     if pts is None:
         cv2.putText(
@@ -188,15 +223,13 @@ def _render_hand_3d(
             cv2.LINE_AA,
         )
     else:
-        # Front view: screen x = display-x (right), screen y = -display-z (up; cv2 y down).
-        px = (cx + xsign * _SCALE * pts[:, 0]).astype(int)
-        py = (cy - _SCALE * pts[:, 2]).astype(int)
+        screen = [proj(pts[i] * _HAND_DISPLAY_SCALE) for i in range(21)]
         for finger, color in zip(_FINGERS, _FINGER_COLORS_BGR, strict=True):
             for a, b in finger:
-                cv2.line(canvas, (px[a], py[a]), (px[b], py[b]), color, 4, cv2.LINE_AA)
+                cv2.line(canvas, screen[a], screen[b], color, 3, cv2.LINE_AA)
         # Joint dots for visibility.
-        for i in range(21):
-            cv2.circle(canvas, (px[i], py[i]), 3, (255, 255, 255), -1, cv2.LINE_AA)
+        for pt in screen:
+            cv2.circle(canvas, pt, 4, _JOINT_COLOR, -1, cv2.LINE_AA)
 
     # --- HUD: FPS (top-left) ---
     if fps is not None:
@@ -236,7 +269,7 @@ def _render_hand_3d(
             ((width - tw) // 2, 56),
             cv2.FONT_HERSHEY_DUPLEX,
             1.0,
-            (0, 255, 255),
+            (0, 0, 200),
             2,
             cv2.LINE_AA,
         )
@@ -268,8 +301,16 @@ class HandRenderer:
         self._hold_start: float | None = None  # monotonic time the hold began
         self._recentered = False  # latched after a successful recenter until the pose is released
         self._calib_msg: str | None = None
-        self._presence: collections.deque[tuple[float, bool]] = collections.deque()
+        self._last_seen_t: float | None = None  # monotonic time of the last good detection
+        # Orbit-camera state (mouse-driven, see _mouse_cb).
+        self._azim = _DEFAULT_AZIM
+        self._elev = _DEFAULT_ELEV
+        self._zoom = _DEFAULT_ZOOM
+        self._dragging = False
+        self._last_mx = 0
+        self._last_my = 0
         cv2.namedWindow(_WIN_NAME, cv2.WINDOW_NORMAL)
+        cv2.setMouseCallback(_WIN_NAME, self._mouse_cb)
 
     # -- public interface ---------------------------------------------------
 
@@ -311,41 +352,16 @@ class HandRenderer:
             elapsed = self._fps_ts[-1] - self._fps_ts[0]
             self._fps = (len(self._fps_ts) - 1) / elapsed if elapsed > 0 else None
 
-        # 3D skeleton.
-        pts = None
-        palm_xyz: np.ndarray | None = None
-        has_hand = present and landmarks_3d is not None
-        self._presence.append((now, has_hand))
-        while self._presence and now - self._presence[0][0] > _PRESENCE_WINDOW_S:
-            self._presence.popleft()
-        if present and landmarks_3d is not None:
-            alpha = self._cfg.smooth
-            if self._smoothed is None:
-                self._smoothed = landmarks_3d.copy()
-            else:
-                self._smoothed = alpha * landmarks_3d + (1 - alpha) * self._smoothed
-            if self._cfg.recenter:
-                self._update_recenter(now)
-            centered = self._smoothed - self._origin
-            pts = (_R @ centered.T).T
-            palm_xyz = centered[_PALM_CENTER_IDX]
-        elif self._cfg.recenter and self._smoothed is not None and not self._recently_absent():
-            # Brief MediaPipe dropout — hold the last pose, countdown and origin alive so a
-            # single missed frame doesn't restart the recenter timer.
-            centered = self._smoothed - self._origin
-            pts = (_R @ centered.T).T
-            palm_xyz = centered[_PALM_CENTER_IDX]
-        else:
-            self._smoothed = None
-            self._hold_start = None
-            self._hold_anchor = None
-            self._recentered = False
-            self._calib_msg = None
+        # 3D skeleton (cv2-free; testable headless).
+        pts, palm_xyz = self._advance_pose(now, present, landmarks_3d)
 
         hand_panel = _render_hand_3d(
             pts,
             width=cam_panel.shape[1],
             mirror=self._cfg.mirror,
+            azim=self._azim,
+            elev=self._elev,
+            zoom=self._zoom,
             fps=self._fps,
             palm_xyz=palm_xyz,
             calib_msg=self._calib_msg,
@@ -361,16 +377,58 @@ class HandRenderer:
             return False
         return cv2.getWindowProperty(_WIN_NAME, cv2.WND_PROP_VISIBLE) >= 1
 
-    def _recently_absent(self) -> bool:
-        """True when the hand was missing for >10% of frames in the last 100 ms.
+    def _advance_pose(
+        self, now: float, present: bool, landmarks_3d: np.ndarray | None
+    ) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """Update smoothing + recenter and return ``(world_pts, palm_xyz)`` for drawing.
 
-        Distinguishes a real hand loss (reset the recenter hold) from a single-frame
-        MediaPipe miss (ignore). Call after the current frame's presence is recorded.
+        cv2-free so the recenter/dropout state machine can be exercised headlessly.
         """
-        if not self._presence:
-            return True
-        present = sum(seen for _, seen in self._presence)
-        return present / len(self._presence) < _PRESENCE_MIN_FRAC
+        if present and landmarks_3d is not None:
+            self._last_seen_t = now
+            alpha = self._cfg.smooth
+            if self._smoothed is None:
+                self._smoothed = landmarks_3d.copy()
+            else:
+                self._smoothed = alpha * landmarks_3d + (1 - alpha) * self._smoothed
+            if self._cfg.recenter:
+                self._update_recenter(now)
+        elif (
+            self._cfg.recenter
+            and self._smoothed is not None
+            and self._last_seen_t is not None
+            and now - self._last_seen_t <= _DROPOUT_GRACE_S
+        ):
+            # Brief MediaPipe dropout — hold the last pose and keep the recenter countdown
+            # advancing so a few missed frames don't restart the timer.
+            self._update_recenter(now)
+        else:
+            self._smoothed = None
+            self._hold_start = None
+            self._hold_anchor = None
+            self._recentered = False
+            self._calib_msg = None
+            self._last_seen_t = None
+            return None, None
+
+        centered = self._smoothed - self._origin
+        return (_R @ centered.T).T, centered[_PALM_CENTER_IDX]
+
+    def _mouse_cb(self, event: int, x: int, y: int, flags: int, param: object) -> None:
+        """Left-drag orbits (azimuth/elevation); scroll zooms — same feel as the reference."""
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self._dragging = True
+            self._last_mx, self._last_my = x, y
+        elif event == cv2.EVENT_LBUTTONUP:
+            self._dragging = False
+        elif event == cv2.EVENT_MOUSEMOVE and self._dragging:
+            self._azim += (x - self._last_mx) * 0.005
+            self._elev += (y - self._last_my) * 0.005
+            self._elev = max(-math.pi / 2, min(math.pi / 2, self._elev))
+            self._last_mx, self._last_my = x, y
+        elif event == cv2.EVENT_MOUSEWHEEL:
+            self._zoom *= 1.1 if flags > 0 else 1 / 1.1
+            self._zoom = max(_ZOOM_MIN, min(_ZOOM_MAX, self._zoom))
 
     def _update_recenter(self, now: float) -> None:
         """Advance the hold-palm-open recenter gesture; sets ``self._origin`` on success.
@@ -405,6 +463,9 @@ class HandRenderer:
             self._calib_msg = "Recentered"
         else:
             self._calib_msg = f"Calibrating... {math.ceil(remaining)}"
+
+    def set_render_origin(self, new_origin: tuple[float, float, float]) -> None:
+        self._origin = np.asarray(new_origin, dtype=float)
 
     def destroy(self) -> None:
         cv2.destroyAllWindows()
