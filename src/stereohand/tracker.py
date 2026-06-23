@@ -236,6 +236,26 @@ class StereoHandTracker:
             present=reading.present,
         )
 
+    def poll(self) -> bool:
+        """Pump the cv2 GUI once; returns ``False`` when the user closed the window / hit 'q'.
+
+        The cheap counterpart to :meth:`render_step`: ``render_step`` draws (only worth doing
+        on a new reading), ``poll`` flushes the imshow buffer to screen and services window
+        events (so the actual paint happens here). An external main-thread loop that drives its
+        own pacing — rather than calling :meth:`run` — should call this every iteration to keep
+        the window painted and responsive. Must be called from the **main thread**.
+        """
+        if self._renderer is None:
+            raise RuntimeError("poll() requires render=True in StereoHandTracker.open()")
+        return self._renderer.poll()
+
+    def set_renderer_origin(self, origin: tuple[float, float, float]) -> None:
+        if self._renderer is None:
+            raise RuntimeError(
+                "set_renderer_origin() requires render=True in StereoHandTracker.open()"
+            )
+        self._renderer.set_render_origin(origin)
+
     def run(self) -> None:
         """Blocking main-thread loop: read + render until the user quits.
 

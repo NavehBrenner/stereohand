@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
-import collections
-
 import numpy as np
 
-from stereohand.renderer import _PRESENCE_MIN_FRAC, HandRenderer, _palm_open_facing
+from stereohand.renderer import (
+    _DROPOUT_GRACE_S,
+    _RECENTER_HOLD_S,
+    HandRenderer,
+    RenderConfig,
+    _palm_open_facing,
+    _project,
+)
+
+
+def test_project_origin_is_panel_center() -> None:
+    assert _project(np.zeros(3), 800, 480, 0.5, 0.3, 1400.0, 1) == (400, 240)
+
+
+def test_project_world_up_maps_to_screen_up() -> None:
+    # World +Z (up) must land above the panel centre (smaller screen-y) at zero elevation.
+    _, sy = _project(np.array([0.0, 0.0, 0.1]), 800, 480, 0.0, 0.0, 1400.0, 1)
+    assert sy < 240
+
+
+def test_project_mirror_flips_x() -> None:
+    pt = np.array([0.05, 0.0, 0.0])
+    sx_normal, _ = _project(pt, 800, 480, 0.0, 0.0, 1400.0, 1)
+    sx_mirror, _ = _project(pt, 800, 480, 0.0, 0.0, 1400.0, -1)
+    assert (sx_normal - 400) == -(sx_mirror - 400)
 
 
 def _pose(*, tip_y: float, mcp_axis: str) -> np.ndarray:
@@ -34,22 +56,44 @@ def test_palm_facing_sideways_is_not_recenter_pose() -> None:
     assert not _palm_open_facing(_pose(tip_y=-0.12, mcp_axis="z"))
 
 
-def _presence_gate(seen: list[bool]) -> bool:
-    # Skip __init__ (it opens a cv2 window); we only exercise the presence math.
-    renderer = HandRenderer.__new__(HandRenderer)
-    renderer._presence = collections.deque((i * 0.01, s) for i, s in enumerate(seen))
-    return renderer._recently_absent()
+def _headless_renderer() -> HandRenderer:
+    """A renderer with recenter on, bypassing __init__ (which opens a cv2 window)."""
+    r = HandRenderer.__new__(HandRenderer)
+    r._cfg = RenderConfig(recenter=True, smooth=0.5)
+    r._smoothed = None
+    r._origin = np.zeros(3)
+    r._hold_start = None
+    r._hold_anchor = None
+    r._recentered = False
+    r._calib_msg = None
+    r._last_seen_t = None
+    return r
 
 
-def test_single_frame_dropout_is_not_a_real_loss() -> None:
-    assert not _presence_gate([True] * 9 + [False])  # 90% present → keep the hold
+def _drive(r: HandRenderer, fps: float, frames: list[bool], palm: np.ndarray) -> None:
+    """Feed `frames` (present/absent) at `fps`, holding `palm` when present."""
+    for i, present in enumerate(frames):
+        r._advance_pose(i / fps, present, palm if present else None)
 
 
-def test_sustained_loss_resets() -> None:
-    # Well below the keep-alive threshold → real loss.
-    n_present = max(1, int(_PRESENCE_MIN_FRAC * 10) - 1)
-    assert _presence_gate([True] * n_present + [False] * (10 - n_present))
+def test_brief_dropouts_dont_restart_recenter_at_low_fps() -> None:
+    # 10 fps, two-frame dropout in every four — at the old 0.2 s window this looked like a
+    # full hand loss and the 3 s countdown never completed. The wall-clock grace fixes it.
+    r = _headless_renderer()
+    palm = _pose(tip_y=-0.12, mcp_axis="x")
+    fps = 10.0
+    frames = [(i % 4) >= 2 for i in range(int(fps * (_RECENTER_HOLD_S + 1)))]
+    _drive(r, fps, frames, palm)
+    assert r._recentered
 
 
-def test_empty_history_counts_as_absent() -> None:
-    assert _presence_gate([])
+def test_sustained_loss_resets_the_hold() -> None:
+    r = _headless_renderer()
+    palm = _pose(tip_y=-0.12, mcp_axis="x")
+    # Hold 1 s, then drop out for well beyond the grace period.
+    _drive(r, 30.0, [True] * 30, palm)
+    assert r._smoothed is not None
+    n_gap = int(30.0 * (_DROPOUT_GRACE_S + 0.5))
+    pts, _ = r._advance_pose(1.0 + n_gap / 30.0, False, None)
+    assert pts is None
+    assert r._smoothed is None and r._hold_start is None
