@@ -151,8 +151,11 @@ def _render_hand_3d(
     xsign = -1 if mirror else 1
 
     # --- World-origin axes (always drawn, even when no hand) ---
+    # Labelled in the *camera* frame (x=right, y=down, z=depth) so the arrows match the
+    # Palm X/Y/Z HUD readout and the metric landmarks consumers receive. The ortho front
+    # view shows X (horizontal) and Y (vertical); Z (depth) points into the screen.
     L = int(_SCALE * _AXIS_LEN_M)
-    # X axis → red (right, or left when mirrored)
+    # X axis → red: camera +x = right (or left when mirrored)
     cv2.arrowedLine(
         canvas, (cx, cy), (cx + xsign * L, cy), (0, 0, 255), 2, cv2.LINE_AA, tipLength=0.15
     )
@@ -166,12 +169,12 @@ def _render_hand_3d(
         1,
         cv2.LINE_AA,
     )
-    # Z axis → blue (up, since we map cam -Y → display Z → screen up)
-    cv2.arrowedLine(canvas, (cx, cy), (cx, cy - L), (255, 0, 0), 2, cv2.LINE_AA, tipLength=0.15)
-    cv2.putText(canvas, "Z", (cx + 4, cy - L - 6), _HUD_FONT, 0.45, (255, 0, 0), 1, cv2.LINE_AA)
-    # Y axis → green (into screen; show as a small dot / circle since ortho front view)
-    cv2.circle(canvas, (cx, cy), 4, (0, 200, 0), -1, cv2.LINE_AA)
-    cv2.putText(canvas, "Y", (cx - 16, cy - 8), _HUD_FONT, 0.45, (0, 200, 0), 1, cv2.LINE_AA)
+    # Y axis → green: camera +y = down (screen-down, since the view maps -cam_y to up)
+    cv2.arrowedLine(canvas, (cx, cy), (cx, cy + L), (0, 200, 0), 2, cv2.LINE_AA, tipLength=0.15)
+    cv2.putText(canvas, "Y", (cx + 4, cy + L + 14), _HUD_FONT, 0.45, (0, 200, 0), 1, cv2.LINE_AA)
+    # Z axis → blue: camera +z = depth, into the screen (ortho front view ⇒ a dot)
+    cv2.circle(canvas, (cx, cy), 4, (255, 0, 0), -1, cv2.LINE_AA)
+    cv2.putText(canvas, "Z", (cx - 16, cy - 8), _HUD_FONT, 0.45, (255, 0, 0), 1, cv2.LINE_AA)
 
     if pts is None:
         cv2.putText(
