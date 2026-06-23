@@ -19,7 +19,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -56,6 +56,7 @@ _ABSENT = StereoHandReading()
 class CaptureLike(Protocol):
     def read(self) -> tuple[Frame, Frame] | None: ...
     def close(self) -> None: ...
+    def latest_pair_timestamp(self) -> float: ...
 
 
 class LandmarkerLike(Protocol):
@@ -77,6 +78,7 @@ class StereoHandTracker:
         capture: CaptureLike,
         landmarker_left: LandmarkerLike,
         landmarker_right: LandmarkerLike,
+        max_fps: int | Literal["cam"] = "cam",
         *,
         rectify: bool = True,
         renderer: HandRenderer | None = None,
@@ -99,6 +101,7 @@ class StereoHandTracker:
         # Landmark both views concurrently: each view has its own detector, so the two
         # ~20 ms CPU inferences overlap instead of summing (≈25→40 fps on the step thread).
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="stereo-lm")
+        self._max_fps = max_fps
 
     @classmethod
     def open(
@@ -108,6 +111,7 @@ class StereoHandTracker:
         left: int | str = 0,
         right: int | str = 2,
         max_skew_s: float = 0.02,
+        max_fps: int | Literal["cam"] = "cam",
         render: bool = False,
         render_config: RenderConfig | None = None,
         **landmarker_kwargs: Any,
@@ -116,6 +120,10 @@ class StereoHandTracker:
 
         Parameters
         ----------
+        max_fps:
+            Cap the background processing rate to this many frames/second; ``'cam'``
+            (default) processes every new camera frame. A lower cap (e.g. 10) runs
+            MediaPipe less often, freeing the GIL for a tight consumer loop.
         render:
             If ``True``, create a cv2 visualisation window.  The window is driven by
             :meth:`run` (blocking main-thread loop) or manually via :meth:`render_step`.
@@ -139,6 +147,7 @@ class StereoHandTracker:
             capture,
             HandLandmarker(**landmarker_kwargs),
             HandLandmarker(**landmarker_kwargs),
+            max_fps=max_fps,
             renderer=renderer,
         )
 
@@ -187,7 +196,24 @@ class StereoHandTracker:
             return self._latest
 
     def _run(self) -> None:
+        # Event-driven, with an optional rate cap. Only run the capture→landmark→triangulate
+        # cycle when the cameras have delivered a *new* frame pair — without this the loop
+        # spins MediaPipe over the same stored frames far faster than the ~30 fps cameras
+        # produce them, wasted CPU that holds the GIL and starves a tight GIL-bound consumer
+        # (the teleop control loop drops to ~0.56x real-time). When `max_fps` is an int, also
+        # cap processing to that rate (e.g. 10 fps even if the cameras run 30) to shed still
+        # more GIL pressure; 'cam' means no cap. A 1 ms poll sits well under the frame interval.
+        min_interval = 0.0 if self._max_fps == "cam" else 1.0 / self._max_fps
+        last_timestamp = -1.0
+        last_processed = 0.0
         while not self._stop.is_set():
+            timestamp = self._capture.latest_pair_timestamp()
+            now = time.monotonic()
+            if timestamp <= last_timestamp or now - last_processed < min_interval:
+                time.sleep(0.001)
+                continue
+            last_timestamp = timestamp
+            last_processed = now
             self.step()
 
     # -- Visualisation (main-thread) ----------------------------------------

@@ -112,6 +112,17 @@ class StereoCapture:
             return None
         return frame_left, frame_right
 
+    def latest_pair_timestamp(self) -> float:
+        """Newest capture time across both cameras (non-blocking peek).
+
+        Lets a consumer run *event-driven* — process only when a fresh frame has
+        landed — instead of busy-spinning over the same stored pair. Returns 0.0
+        before either camera has delivered its first frame.
+        """
+        ts_left, _ = self._left.latest()
+        ts_right, _ = self._right.latest()
+        return max(ts_left, ts_right)
+
     def close(self) -> None:
         self._left.close()
         self._right.close()

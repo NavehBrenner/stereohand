@@ -42,6 +42,9 @@ class _FakeCapture:
     def read(self):
         return self._pair
 
+    def latest_pair_timestamp(self) -> float:
+        return 0.0  # only the background _run thread reads this; step() tests don't
+
     def close(self):
         pass
 
