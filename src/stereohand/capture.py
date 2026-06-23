@@ -16,6 +16,7 @@ but rolling-shutter differences make sync the hard part — ``max_skew_s`` is th
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from typing import Any
@@ -31,13 +32,22 @@ def within_skew(timestamp_left: float, timestamp_right: float, max_skew_s: float
     return abs(timestamp_left - timestamp_right) <= max_skew_s
 
 
+def open_capture(source: int | str) -> Any:
+    """Open a camera. Forces DirectShow for integer indices on Windows, where the default
+    MSMF backend stalls ~20s per camera; URLs (the WSL bridge) and other platforms use the
+    default backend. Returns a ``cv2.VideoCapture``."""
+    import cv2
+
+    if sys.platform == "win32" and isinstance(source, int):
+        return cv2.VideoCapture(source, cv2.CAP_DSHOW)
+    return cv2.VideoCapture(source)
+
+
 class _CameraThread:
     """Background grabber for one camera: keeps only the latest (timestamp, frame)."""
 
     def __init__(self, source: int | str, name: str) -> None:
-        import cv2
-
-        self._capture = cv2.VideoCapture(source)
+        self._capture = open_capture(source)
         if not self._capture.isOpened():
             raise RuntimeError(f"could not open camera source {source!r}")
         self._lock = threading.Lock()

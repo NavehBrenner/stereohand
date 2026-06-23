@@ -20,6 +20,8 @@ if _cv2_spec and _cv2_spec.origin:
 
 import cv2  # noqa: E402  (after cv2-Qt font path fix above)
 
+from stereohand.capture import open_capture  # noqa: E402  (after cv2-Qt font path fix above)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -30,8 +32,8 @@ def main() -> None:
     left: int | str = int(args.left) if args.left.isdigit() else args.left
     right: int | str = int(args.right) if args.right.isdigit() else args.right
 
-    cap_l = cv2.VideoCapture(left)
-    cap_r = cv2.VideoCapture(right)
+    cap_l = open_capture(left)
+    cap_r = open_capture(right)
 
     try:
         while True:

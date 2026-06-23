@@ -29,6 +29,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from stereohand.board import BOARD, CharucoBoardSpec, make_board
+from stereohand.capture import open_capture
 
 FloatArray = NDArray[np.float64]
 
@@ -338,10 +339,8 @@ def live_calibrate(
 
     board = make_board(spec)
     detector = cv2.aruco.CharucoDetector(board)
-    capture_left = cv2.VideoCapture(int(left_source) if str(left_source).isdigit() else left_source)
-    capture_right = cv2.VideoCapture(
-        int(right_source) if str(right_source).isdigit() else right_source
-    )
+    capture_left = open_capture(int(left_source) if str(left_source).isdigit() else left_source)
+    capture_right = open_capture(int(right_source) if str(right_source).isdigit() else right_source)
     if not (capture_left.isOpened() and capture_right.isOpened()):
         capture_left.release()
         capture_right.release()
