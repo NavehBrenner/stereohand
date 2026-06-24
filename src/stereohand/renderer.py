@@ -117,10 +117,9 @@ def _palm_open_facing(pts: np.ndarray) -> bool:
     return norm > 0 and abs(normal[2]) > 0.7 * norm
 
 
-# Light background, gray joints and red/blue/black axis gizmo — matches the reference
-# viewer in project-wiki/raw/visualize_3d_pose_rt.py.
+# Light background and red/blue/black axis gizmo — matches the reference viewer in
+# project-wiki/raw/visualize_3d_pose_rt.py. Skeleton is lines only (no joint dots).
 _BG_COLOR = (240, 240, 240)
-_JOINT_COLOR = (80, 80, 80)
 _AXIS_COLORS = [
     (0, 0, 255),  # X → red
     (255, 0, 0),  # Y → blue
@@ -229,9 +228,6 @@ def _render_hand_3d(
         for finger, color in zip(_FINGERS, _FINGER_COLORS_BGR, strict=True):
             for a, b in finger:
                 cv2.line(canvas, screen[a], screen[b], color, 3, cv2.LINE_AA)
-        # Joint dots for visibility.
-        for pt in screen:
-            cv2.circle(canvas, pt, 4, _JOINT_COLOR, -1, cv2.LINE_AA)
 
     # --- HUD: FPS (top-left) ---
     if fps is not None:
