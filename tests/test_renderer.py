@@ -67,6 +67,7 @@ def _headless_renderer() -> HandRenderer:
     r._recentered = False
     r._calib_msg = None
     r._last_seen_t = None
+    r._last_good_pose_t = None
     return r
 
 
@@ -84,6 +85,20 @@ def test_brief_dropouts_dont_restart_recenter_at_low_fps() -> None:
     fps = 10.0
     frames = [(i % 4) >= 2 for i in range(int(fps * (_RECENTER_HOLD_S + 1)))]
     _drive(r, fps, frames, palm)
+    assert r._recentered
+
+
+def test_brief_pose_flicker_within_grace_doesnt_restart() -> None:
+    # Hand stays present but the smoothed pose flickers to a fist for a 0.1 s burst (< grace).
+    # Like a dropout, a brief pose flicker must not restart the 3 s hold. With the old
+    # instant-reset this burst left under 3 s of open palm and never completed.
+    r = _headless_renderer()
+    open_palm = _pose(tip_y=-0.12, mcp_axis="x")
+    fist = _pose(tip_y=-0.04, mcp_axis="x")
+    fps = 30.0
+    burst = set(range(int(fps * 1.5), int(fps * 1.5) + 3))  # 3-frame (0.1 s) fist flicker
+    for i in range(int(fps * (_RECENTER_HOLD_S + 1))):
+        r._advance_pose(i / fps, True, fist if i in burst else open_palm)
     assert r._recentered
 
 
