@@ -39,3 +39,11 @@ The project provides several scripts in the `scripts/` directory for core operat
 ## API Documentation
 For programmatic integration, refer to the dedicated `docs/` folder.
 - See **[docs/api.md](docs/api.md)** for the full documentation of the `StereoHandTracker` API, `RenderConfig`, and the `StereoCalibration` pipeline.
+
+## Knowledge base (workspace only)
+This `AGENTS.md` owns stereohand's repo-local engineering rules. When working **inside the
+`autonomous-systems-workshop` workspace** (this repo is a sibling there), durable,
+transferable findings — stereo-vision/MediaPipe quirks, calibration gotchas, design
+rationale — also go in the workspace's private `project-wiki/` (one level up), which is
+workspace-wide and covers both repos. That wiki is **private**: never copy its content into
+this public repo. (No effect when stereohand is cloned standalone — there is no wiki to keep.)
