@@ -5,7 +5,7 @@
 set -euo pipefail
 
 if [ ! -x .venv/bin/python ]; then
-    echo "pre-push: no .venv — run 'uv pip install -e .[dev]'; skipping." >&2
+    echo "pre-push: no .venv — run 'pip install -e \".[dev]\"'; skipping." >&2
     exit 0
 fi
 
