@@ -88,9 +88,11 @@ _PALM_CENTER_IDX = 9
 # re-zero the world origin to the current palm position.
 _RECENTER_HOLD_S = 3.0
 _RECENTER_MOVE_TOL_M = 0.02  # palm may drift this much (2 cm) and still count as "still"
-# A recenter hold survives brief MediaPipe dropouts: hold the last pose (and keep the
-# countdown running) until the hand has been gone this long. Wall-clock based, so the
-# tolerance is the same at 10 fps or 30 fps — a longer gap counts as the hand leaving.
+# A recenter hold survives brief losses of the open-palm pose — a MediaPipe dropout OR a
+# single flickered frame where the smoothed hand fails the pose test. The hold (and its
+# countdown) only restart once the good pose has been gone this long, counting wall-clock
+# time from the last good frame, so the tolerance is the same at 10 fps or 30 fps. This is
+# the same mechanism as kevin's calibrate_neutral (its ``pose_grace_s`` / ``last_good_time``).
 _DROPOUT_GRACE_S = 0.4
 _FINGER_TIPS = (8, 12, 16, 20)  # index, middle, ring, pinky tips (skip thumb)
 _FINGER_MCPS = (5, 9, 13, 17)  # their knuckles
@@ -301,7 +303,8 @@ class HandRenderer:
         self._hold_start: float | None = None  # monotonic time the hold began
         self._recentered = False  # latched after a successful recenter until the pose is released
         self._calib_msg: str | None = None
-        self._last_seen_t: float | None = None  # monotonic time of the last good detection
+        self._last_seen_t: float | None = None  # monotonic time of the last present detection
+        self._last_good_pose_t: float | None = None  # last present open-palm frame (monotonic)
         # Orbit-camera state (mouse-driven, see _mouse_cb).
         self._azim = _DEFAULT_AZIM
         self._elev = _DEFAULT_ELEV
@@ -392,16 +395,16 @@ class HandRenderer:
             else:
                 self._smoothed = alpha * landmarks_3d + (1 - alpha) * self._smoothed
             if self._cfg.recenter:
-                self._update_recenter(now)
+                self._update_recenter(now, present=True)
         elif (
             self._cfg.recenter
             and self._smoothed is not None
             and self._last_seen_t is not None
             and now - self._last_seen_t <= _DROPOUT_GRACE_S
         ):
-            # Brief MediaPipe dropout — hold the last pose and keep the recenter countdown
-            # advancing so a few missed frames don't restart the timer.
-            self._update_recenter(now)
+            # Brief MediaPipe dropout — hold the last pose and let the recenter hold ride
+            # out the gap; _update_recenter's own grace decides when it actually resets.
+            self._update_recenter(now, present=False)
         else:
             self._smoothed = None
             self._hold_start = None
@@ -409,6 +412,7 @@ class HandRenderer:
             self._recentered = False
             self._calib_msg = None
             self._last_seen_t = None
+            self._last_good_pose_t = None
             return None, None
 
         centered = self._smoothed - self._origin
@@ -430,22 +434,29 @@ class HandRenderer:
             self._zoom *= 1.1 if flags > 0 else 1 / 1.1
             self._zoom = max(_ZOOM_MIN, min(_ZOOM_MAX, self._zoom))
 
-    def _update_recenter(self, now: float) -> None:
+    def _update_recenter(self, now: float, *, present: bool) -> None:
         """Advance the hold-palm-open recenter gesture; sets ``self._origin`` on success.
 
         Assumes ``self._smoothed`` is set. Holding an open palm, square to the camera and
         still for :data:`_RECENTER_HOLD_S` seconds re-zeros the origin to the palm. The
         result latches until the pose is released, so it fires once per hold, not every
         frame.
+
+        A lost pose — sensor drop-out (``present=False``) *or* a flickered frame that fails
+        the open-palm test — only re-arms the hold once the good pose has been gone longer
+        than :data:`_DROPOUT_GRACE_S`, counting from the last good frame; within that grace
+        the hold and countdown are kept. Mirrors kevin's ``calibrate_neutral``.
         """
         assert self._smoothed is not None
-        palm = self._smoothed[_PALM_CENTER_IDX]
-        if not _palm_open_facing(self._smoothed):
-            self._hold_start = None
-            self._hold_anchor = None
-            self._recentered = False  # pose released → re-arm for the next hold
-            self._calib_msg = None
+        if not (present and _palm_open_facing(self._smoothed)):
+            if self._last_good_pose_t is None or now - self._last_good_pose_t > _DROPOUT_GRACE_S:
+                self._hold_start = None
+                self._hold_anchor = None
+                self._recentered = False  # pose gone past grace → re-arm for the next hold
+                self._calib_msg = None
             return
+        self._last_good_pose_t = now
+        palm = self._smoothed[_PALM_CENTER_IDX]
         if self._recentered:
             self._calib_msg = "Recentered"
             return

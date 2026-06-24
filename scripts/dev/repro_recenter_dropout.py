@@ -33,6 +33,7 @@ def fresh_renderer() -> HandRenderer:
     r._recentered = False
     r._calib_msg = None
     r._last_seen_t = None
+    r._last_good_pose_t = None
     return r
 
 
