@@ -50,13 +50,11 @@ def test_batch_round_trip():
     P1, P2 = _stereo_rig()
     rng = np.random.default_rng(0)
     # 21 points spread over a plausible hand volume ~0.5–0.7 m in front of the rig.
-    truth = np.column_stack(
-        [
-            rng.uniform(-0.1, 0.1, 21),
-            rng.uniform(-0.1, 0.1, 21),
-            rng.uniform(0.5, 0.7, 21),
-        ]
-    )
+    truth = np.column_stack([
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(0.5, 0.7, 21),
+    ])
     pts1 = _project(P1, truth)
     pts2 = _project(P2, truth)
     recovered = triangulate_points(P1, P2, pts1, pts2)

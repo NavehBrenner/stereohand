@@ -7,7 +7,8 @@
 - Environment: Python 3.12+ virtual environment.
 - Installation: `pip install -e ".[dev,demo]"`
 - Enable git hooks once per clone: `git config core.hooksPath .githooks`
-- Tools: `ruff` (lint/format), `mypy` (types), `pytest` (tests).
+- Tools: `ruff` (lint/format), `mypy` (types), `pytest` (tests), run via `poe` tasks
+  (`poe fmt` / `poe lint` / `poe typecheck` / `poe test` / `poe check` — same shape as kevin).
 
 ## Git workflow & hooks
 - `master` is the default branch and is **protected** — no direct pushes; all changes land via PR.
