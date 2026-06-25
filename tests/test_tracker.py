@@ -6,7 +6,7 @@ import numpy as np
 
 from stereohand.calibration import StereoCalibration
 from stereohand.landmarker import HandLandmarks2D
-from stereohand.tracker import StereoHandTracker
+from stereohand.tracker import StereoHandTracker, write_gif
 
 
 def _calib(baseline: float = 0.12) -> StereoCalibration:
@@ -116,3 +116,17 @@ def test_absent_when_no_synced_pair():
         rectify=False,
     )
     assert not tracker.step().present
+
+
+def test_write_gif_subsamples_and_downscales(tmp_path):
+    from PIL import Image
+
+    # 30 BGR frames at 1000-wide; expect 30fps→10fps (every 3rd) and 1000→640 wide.
+    frames = [np.full((100, 1000, 3), i, dtype=np.uint8) for i in range(30)]
+    out = tmp_path / "out.gif"
+    write_gif(str(out), frames, fps=30.0, max_width=640, max_fps=10.0)
+
+    gif = Image.open(out)
+    assert gif.size == (640, 64)
+    assert gif.n_frames == 10
+    assert gif.info.get("loop") == 0

@@ -28,6 +28,41 @@ from stereohand.calibration import StereoCalibration
 from stereohand.landmarker import HandLandmarks2D
 from stereohand.triangulation import triangulate_points
 
+
+def write_gif(
+    path: str,
+    frames: list[NDArray[np.uint8]],
+    *,
+    fps: float,
+    max_width: int = 640,
+    max_fps: float = 12.0,
+) -> None:
+    """Write BGR ``frames`` to an optimized GIF for README/markdown embeds.
+
+    Subsamples to ``max_fps`` and downscales to ``max_width`` so the file stays
+    small enough to commit and autoplay inline. ``frames`` are OpenCV BGR arrays.
+    """
+    import cv2
+    from PIL import Image
+
+    step = max(1, round(fps / max_fps))
+    out_fps = fps / step
+    images = []
+    for frame in frames[::step]:
+        height, width = frame.shape[:2]
+        if width > max_width:
+            frame = cv2.resize(frame, (max_width, round(height * max_width / width)))
+        images.append(Image.fromarray(frame[:, :, ::-1]))  # BGR → RGB
+    images[0].save(
+        path,
+        save_all=True,
+        append_images=images[1:],
+        duration=round(1000 / out_fps),
+        loop=0,
+        optimize=True,
+    )
+
+
 FloatArray = NDArray[np.float64]
 
 # Lazy import: only pulled in when render=True so headless stays cv2-free.
@@ -267,10 +302,11 @@ class StereoHandTracker:
         Parameters
         ----------
         record_path:
-            If given, write the composite window output to this file as a video
-            (e.g. ``"docs/demo.mp4"``).  The codec is chosen by the file extension:
-            ``.mp4`` uses H.264 (``avc1``), everything else falls back to MJPEG.
-            Recording runs alongside the live display and stops when the user quits.
+            If given, write the composite window output to this file. A ``.gif``
+            extension produces an optimized GIF (downscaled, ~12 fps) for inline
+            markdown embeds; any other extension is a video — ``.mp4`` uses H.264
+            (``avc1``), everything else falls back to MJPEG. Recording runs
+            alongside the live display and stops when the user quits.
         """
         if self._renderer is None:
             raise RuntimeError("run() requires render=True in StereoHandTracker.open()")
@@ -297,6 +333,10 @@ class StereoHandTracker:
                 writer.release()
             raise RuntimeError(f"Could not open VideoWriter for {path!r}: tried codecs {codecs}")
 
+        is_gif = record_path is not None and record_path.lower().endswith(".gif")
+        _GIF_FPS = 12.0  # gif target rate; subsampled live to keep RAM + file small
+        gif_last_kept = 0.0
+
         writer: cv2.VideoWriter | None = None
         # Buffer early frames until we can measure the actual render rate; without this
         # the VideoWriter gets a hard-coded FPS that never matches reality, producing
@@ -312,7 +352,15 @@ class StereoHandTracker:
                 if self._reading_ready.wait(timeout=0.1):
                     self._reading_ready.clear()
                     composite = self.render_step()
-                    if composite is not None and record_path is not None:
+                    if composite is not None and is_gif:
+                        # ponytail: time-gate to ~12fps so the in-RAM frame buffer
+                        # stays small. Buffers in memory — fine for short demo
+                        # clips; stream to disk if you ever record minutes.
+                        now = _time.monotonic()
+                        if now - gif_last_kept >= 1.0 / _GIF_FPS:
+                            frame_buffer.append(composite)
+                            gif_last_kept = now
+                    elif composite is not None and record_path is not None:
                         if writer is None:
                             # Still warming up — buffer frames and timestamps.
                             frame_buffer.append(composite)
@@ -333,7 +381,10 @@ class StereoHandTracker:
                 if not renderer.poll():
                     break
         finally:
-            if writer is not None:
+            if is_gif and frame_buffer and record_path is not None:
+                write_gif(record_path, frame_buffer, fps=_GIF_FPS)
+                print(f"Saved recording → {record_path}", file=sys.stderr)
+            elif writer is not None:
                 writer.release()
                 print(f"Saved recording → {record_path}", file=sys.stderr)
             elif frame_buffer and record_path is not None:
