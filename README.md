@@ -8,8 +8,11 @@ no real depth — its `z` is a relative guess. `stereohand` adds a second camera
 per-view **MediaPipe Tasks** `HandLandmarker` → **linear-DLT** triangulation → `(21, 3)`
 landmarks in real-world units (metres).
 
-<!-- TODO(demo): drop a recorded GIF of scripts/demo.py here — docs/demo.gif -->
-<!-- ![demo](docs/demo.gif) -->
+<p align="center">
+  <video src="https://github.com/NavehBrenner/stereohand/raw/master/docs/demo.mp4" width="720" autoplay loop muted playsinline>
+    <a href="docs/demo.mp4">Watch the demo video</a>
+  </video>
+</p>
 
 ```python
 from stereohand import StereoHandTracker, StereoCalibration
@@ -94,6 +97,7 @@ python scripts/demo.py --calib stereo_calib.json --left 0 --right 2   # load a s
 python scripts/demo.py --calibrate --left 0 --right 1                 # calibrate inline, then track
 python scripts/demo.py --mirror                                       # mirror mode (flipped view)
 python scripts/demo.py --mirror --smooth 0.3                          # mirrored + extra smoothing
+python scripts/demo.py --record docs/demo.mp4                          # record the window to a video file
 ```
 
 The window shows live camera feeds (top) and a 3D hand skeleton (bottom) with FPS and
@@ -152,6 +156,7 @@ The demo script maps CLI flags to the parameters above:
 | `--right SOURCE` | `right=` | Right camera index or URL. Default: `2`. |
 | `--mirror` | `RenderConfig.mirror` | Enable mirror mode. |
 | `--smooth ALPHA` | `RenderConfig.smooth` | EMA smoothing alpha. Default: `0.5`. |
+| `--record PATH` | `tracker.run(record_path=PATH)` | Record the composite window output to a video file (e.g. `docs/demo.mp4`). Press Q to stop and save. |
 
 ### Programmatic usage with rendering
 

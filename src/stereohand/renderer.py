@@ -320,12 +320,17 @@ class HandRenderer:
         landmarks_2d: tuple[HandLandmarks2D | None, HandLandmarks2D | None] | None,
         landmarks_3d: np.ndarray | None,
         present: bool,
-    ) -> None:
-        """Draw one composite frame. Call only on new data; :meth:`poll` keeps the window live."""
+    ) -> np.ndarray | None:
+        """Draw one composite frame. Call only on new data; :meth:`poll` keeps the window live.
+
+        Returns the composite BGR image shown in the window (camera feeds stacked above the
+        3D skeleton panel), or ``None`` when *frames* is ``None``.  Callers may write this
+        frame to a :class:`cv2.VideoWriter` for recording.
+        """
         from stereohand.landmarker import draw_landmarks_on_frame
 
         if frames is None:
-            return
+            return None
 
         fl, fr = frames
         if landmarks_2d is not None:
@@ -366,7 +371,9 @@ class HandRenderer:
             calib_msg=self._calib_msg,
         )
 
-        cv2.imshow(_WIN_NAME, cv2.vconcat([cam_panel, hand_panel]))
+        composite: np.ndarray = cv2.vconcat([cam_panel, hand_panel])
+        cv2.imshow(_WIN_NAME, composite)
+        return composite
 
     def poll(self) -> bool:
         """Pump the cv2 GUI once (repaint, events). Returns ``False`` when the user closes
