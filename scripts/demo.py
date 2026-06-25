@@ -5,8 +5,9 @@
 A cv2 window shows live camera feeds (top) and a 3D hand skeleton (bottom) with FPS and
 palm-centre XYZ overlaid. Press **Q** or **ESC** to quit.
 
-Use ``--record docs/demo.mp4`` to write the window output to a video file while also
-displaying live — press Q to stop and save.
+Use ``--record docs/demo.gif`` to write the window output to a file while also
+displaying live (``.gif`` → optimized GIF, any other extension → video) — press Q
+to stop and save.
 
 All rendering is built into ``StereoHandTracker`` — this script is just CLI glue.
 """
@@ -44,7 +45,7 @@ def main() -> None:
         "--record",
         metavar="PATH",
         default=None,
-        help="record the composite window to a video file (e.g. docs/demo.mp4)",
+        help="record the composite window; .gif → optimized GIF, else video (e.g. docs/demo.mp4)",
     )
     args = parser.parse_args()
 
