@@ -2,8 +2,11 @@
 
     python scripts/demo.py --calib stereo_calib.json --left 0 --right 2
 
-A cv2 window shows the live camera feeds (top) and the 3D hand skeleton (bottom),
-rendered in the handpose3d style. Press 'q' or ESC (or close the window) to quit.
+A cv2 window shows live camera feeds (top) and a 3D hand skeleton (bottom) with FPS and
+palm-centre XYZ overlaid. Press **Q** or **ESC** to quit.
+
+Use ``--record docs/demo.mp4`` to write the window output to a video file while also
+displaying live — press Q to stop and save.
 
 All rendering is built into ``StereoHandTracker`` — this script is just CLI glue.
 """
@@ -37,6 +40,12 @@ def main() -> None:
         action="store_true",
         help="hold an open palm (square to a camera) still for 3 s to re-zero the origin",
     )
+    parser.add_argument(
+        "--record",
+        metavar="PATH",
+        default=None,
+        help="record the composite window to a video file (e.g. docs/demo.mp4)",
+    )
     args = parser.parse_args()
 
     left = int(args.left) if args.left.isdigit() else args.left
@@ -56,7 +65,7 @@ def main() -> None:
         render=True,
         render_config=render_cfg,
     ) as tracker:
-        tracker.run()
+        tracker.run(record_path=args.record)
 
 
 if __name__ == "__main__":

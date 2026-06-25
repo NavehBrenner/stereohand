@@ -220,16 +220,18 @@ class StereoHandTracker:
 
     # -- Visualisation (main-thread) ----------------------------------------
 
-    def render_step(self) -> None:
+    def render_step(self) -> np.ndarray | None:
         """Draw the latest state once. Pair with the renderer's ``poll()`` for responsiveness.
 
         Must be called from the **main thread** (cv2 GUI requirement).  The background
         tracker thread keeps running; this just visualises the latest state.
+
+        Returns the composite BGR frame shown in the window, or ``None`` if no data yet.
         """
         if self._renderer is None:
             raise RuntimeError("render_step() requires render=True in StereoHandTracker.open()")
         reading = self.read()  # also starts the background thread on first call
-        self._renderer.step(
+        return self._renderer.step(
             frames=self.last_processed_frames,
             landmarks_2d=self.last_landmark_2d,
             landmarks_3d=reading.landmarks if reading.present else None,
@@ -256,25 +258,94 @@ class StereoHandTracker:
             )
         self._renderer.set_render_origin(origin)
 
-    def run(self) -> None:
+    def run(self, *, record_path: str | None = None) -> None:
         """Blocking main-thread loop: read + render until the user quits.
 
         Convenience wrapper around :meth:`render_step` — call this from ``main()`` and
         forget about the loop.
+
+        Parameters
+        ----------
+        record_path:
+            If given, write the composite window output to this file as a video
+            (e.g. ``"docs/demo.mp4"``).  The codec is chosen by the file extension:
+            ``.mp4`` uses H.264 (``avc1``), everything else falls back to MJPEG.
+            Recording runs alongside the live display and stops when the user quits.
         """
         if self._renderer is None:
             raise RuntimeError("run() requires render=True in StereoHandTracker.open()")
         renderer = self._renderer
+        import sys
+        import time as _time
+
+        import cv2  # noqa: E402 — lazy; already loaded because render=True
+
+        _FPS_WARMUP = 10  # frames to buffer before measuring the real render rate
+
+        def _open_writer(path: str, width: int, height: int, fps: float) -> cv2.VideoWriter:
+            """Try several codecs in order; return the first that opens successfully."""
+            codecs = ["mp4v", "avc1", "XVID"] if path.endswith(".mp4") else ["MJPG", "XVID"]
+            for tag in codecs:
+                fourcc = cv2.VideoWriter.fourcc(*tag)
+                writer = cv2.VideoWriter(path, fourcc, fps, (width, height))
+                if writer.isOpened():
+                    print(
+                        f"Recording → {path}  (codec {tag}, {fps:.1f} fps)",
+                        file=sys.stderr,
+                    )
+                    return writer
+                writer.release()
+            raise RuntimeError(f"Could not open VideoWriter for {path!r}: tried codecs {codecs}")
+
+        writer: cv2.VideoWriter | None = None
+        # Buffer early frames until we can measure the actual render rate; without this
+        # the VideoWriter gets a hard-coded FPS that never matches reality, producing
+        # slow-motion or fast-forward playback.
+        frame_buffer: list[np.ndarray] = []
+        frame_times: list[float] = []
         self.read()  # start the background thread so publishes (and the wake event) flow
-        while True:
-            # Redraw only on a new reading; poll() pumps the cv2 GUI every iteration so the
-            # window stays responsive (repaint, close/quit) even when the feed stalls. The
-            # wait timeout bounds that polling rate when no new frame arrives.
-            if self._reading_ready.wait(timeout=0.1):
-                self._reading_ready.clear()
-                self.render_step()
-            if not renderer.poll():
-                break
+        try:
+            while True:
+                # Redraw only on a new reading; poll() pumps the cv2 GUI every iteration so
+                # the window stays responsive (repaint, close/quit) even when the feed
+                # stalls. The wait timeout bounds that polling rate when no new frame arrives.
+                if self._reading_ready.wait(timeout=0.1):
+                    self._reading_ready.clear()
+                    composite = self.render_step()
+                    if composite is not None and record_path is not None:
+                        if writer is None:
+                            # Still warming up — buffer frames and timestamps.
+                            frame_buffer.append(composite)
+                            frame_times.append(_time.monotonic())
+                            if len(frame_buffer) >= _FPS_WARMUP:
+                                elapsed = frame_times[-1] - frame_times[0]
+                                measured_fps = (
+                                    (len(frame_times) - 1) / elapsed if elapsed > 0 else 20.0
+                                )
+                                height, width = composite.shape[:2]
+                                writer = _open_writer(record_path, width, height, measured_fps)
+                                for buffered_frame in frame_buffer:
+                                    writer.write(buffered_frame)
+                                frame_buffer.clear()
+                                frame_times.clear()
+                        else:
+                            writer.write(composite)
+                if not renderer.poll():
+                    break
+        finally:
+            if writer is not None:
+                writer.release()
+                print(f"Saved recording → {record_path}", file=sys.stderr)
+            elif frame_buffer and record_path is not None:
+                # Quit before warmup finished — flush what we have at a default rate.
+                height, width = frame_buffer[0].shape[:2]
+                elapsed = frame_times[-1] - frame_times[0] if len(frame_times) > 1 else 0
+                fps = (len(frame_times) - 1) / elapsed if elapsed > 0 else 20.0
+                writer = _open_writer(record_path, width, height, fps)
+                for buffered_frame in frame_buffer:
+                    writer.write(buffered_frame)
+                writer.release()
+                print(f"Saved recording → {record_path}", file=sys.stderr)
 
     def close(self) -> None:
         self._stop.set()
