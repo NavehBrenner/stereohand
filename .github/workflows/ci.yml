@@ -15,11 +15,12 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install -e ".[dev]"
+      # Same tasks `poe check` runs locally, so CI and dev share one definition.
       - name: Lint
-        run: ruff check .
+        run: poe lint
       - name: Format check
-        run: ruff format --check .
+        run: poe fmt-check
       - name: Typecheck
-        run: mypy src
+        run: poe typecheck
       - name: Test
-        run: pytest -q
+        run: poe test

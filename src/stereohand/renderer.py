@@ -54,13 +54,11 @@ class RenderConfig:
 #   world_y = cam_z   (depth, into screen)
 #   world_z = -cam_y  (up: cam y is down, so negate)
 # The orbiting projection below expects this Z-up world (azimuth turns around Z).
-_R = np.array(
-    [
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-        [0.0, -1.0, 0.0],
-    ]
-)
+_R = np.array([
+    [1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [0.0, -1.0, 0.0],
+])
 
 # Finger groups — exact copy from handpose3d's show_3d_hands.py.
 _FINGERS = [

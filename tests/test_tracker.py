@@ -71,9 +71,11 @@ def _dummy_frames():
 def test_seam_triangulates_to_known_3d():
     calib = _calib()
     rng = np.random.default_rng(0)
-    truth = np.column_stack(
-        [rng.uniform(-0.1, 0.1, 21), rng.uniform(-0.1, 0.1, 21), rng.uniform(0.5, 0.7, 21)]
-    )
+    truth = np.column_stack([
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(0.5, 0.7, 21),
+    ])
     pts1, pts2 = _project(calib.P1, truth), _project(calib.P2, truth)
 
     tracker = StereoHandTracker(

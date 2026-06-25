@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff>=0.5", "mypy>=1.10", "pytest>=8.0"]
+dev = ["ruff>=0.5", "mypy>=1.10", "pytest>=8.0", "poethepoet>=0.24"]
 demo = ["matplotlib>=3.8"]
 
 [project.scripts]
@@ -40,10 +40,21 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+ignore = ["E501"] # line length is handled by formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["stereohand"]
+
+[tool.ruff.format]
+# Preview style (hugs sole bracketed args, etc). Matches the editor's
+# format-on-save (`ruff.format.preview` in .vscode/settings.json) so save and
+# `poe fmt`/CI agree instead of reverting each other.
+preview = true
 
 [tool.mypy]
 python_version = "3.12"
+files = ["src"]
 strict = true
 # Treat cv2 / mediapipe as untyped: their bundled stubs are too strict for the dynamic
 # runtime API (overloaded signatures, optional out-params), so skip analyzing them.
@@ -54,3 +65,17 @@ follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Project task runner (poethepoet) — `poe <task>`, same shape as kevin's.
+# mypy/pytest go through `python -m` because this box's relocated .venv has stale
+# console-script shebangs (ruff is a standalone binary, so it's called directly).
+[tool.poe.tasks]
+# Strip/sort imports (ruff check --fix, incl. the I rule) then format.
+# `;` not `&&` so formatting still runs if check leaves an unfixable lint;
+# `lint` and CI are the real gate.
+fmt = { shell = "ruff check --fix src tests scripts; ruff format src tests scripts" }
+fmt-check = "ruff format --check src tests scripts"  # non-mutating, for CI
+lint = "ruff check --fix src tests scripts"
+typecheck = "python -m mypy"
+test = "python -m pytest -q"
+check = ["lint", "typecheck", "test"]  # the full gate, same as CI
