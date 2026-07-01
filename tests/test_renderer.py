@@ -102,6 +102,17 @@ def test_brief_pose_flicker_within_grace_doesnt_restart() -> None:
     assert r._recentered
 
 
+def test_brief_dropout_holds_pose_without_recenter() -> None:
+    # Plain display (recenter off): a single-frame MediaPipe miss must NOT blank the 3D
+    # skeleton. Hold the last pose through dropouts shorter than the grace window.
+    r = _headless_renderer()
+    r._cfg = RenderConfig(recenter=False, smooth=0.5)
+    palm = _pose(tip_y=-0.12, mcp_axis="x")
+    _drive(r, 30.0, [True] * 30, palm)  # ~1 s of hand, last seen at t≈0.97
+    pts, _ = r._advance_pose(1.1, False, None)  # 0.13 s gap < grace
+    assert pts is not None  # skeleton still drawn during the dropout
+
+
 def test_sustained_loss_resets_the_hold() -> None:
     r = _headless_renderer()
     palm = _pose(tip_y=-0.12, mcp_axis="x")
