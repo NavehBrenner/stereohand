@@ -398,14 +398,17 @@ class HandRenderer:
             if self._cfg.recenter:
                 self._update_recenter(now, present=True)
         elif (
-            self._cfg.recenter
-            and self._smoothed is not None
+            self._smoothed is not None
             and self._last_seen_t is not None
             and now - self._last_seen_t <= _DROPOUT_GRACE_S
         ):
-            # Brief MediaPipe dropout — hold the last pose and let the recenter hold ride
-            # out the gap; _update_recenter's own grace decides when it actually resets.
-            self._update_recenter(now, present=False)
+            # Brief MediaPipe dropout — hold the last pose so the 3D skeleton doesn't flicker
+            # on single-frame misses. The two independent per-view detectors make all-or-
+            # nothing drops common (a miss in *either* view blanks the reading), so without
+            # this the skeleton strobes. Recenter mode additionally lets its hold ride out
+            # the gap; _update_recenter's own grace decides when it actually resets.
+            if self._cfg.recenter:
+                self._update_recenter(now, present=False)
         else:
             self._smoothed = None
             self._hold_start = None
