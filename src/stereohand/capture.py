@@ -33,13 +33,21 @@ def within_skew(timestamp_left: float, timestamp_right: float, max_skew_s: float
 
 
 def open_capture(source: int | str) -> Any:
-    """Open a camera. Forces DirectShow for integer indices on Windows, where the default
-    MSMF backend stalls ~20s per camera; URLs (the WSL bridge) and other platforms use the
-    default backend. Returns a ``cv2.VideoCapture``."""
+    """Open a camera. For integer indices (local USB cameras) request **MJPG**: two webcams on
+    one USB controller overrun its bandwidth on raw YUYV (~10x the bytes) and one camera blacks
+    out / stalls — MJPG is compressed and lets both stream. On Windows also force DirectShow
+    (the default MSMF backend stalls ~20s per camera). URLs (the WSL bridge) and non-int sources
+    use the default backend untouched. Returns a ``cv2.VideoCapture``."""
     import cv2
 
-    if sys.platform == "win32" and isinstance(source, int):
-        return cv2.VideoCapture(source, cv2.CAP_DSHOW)
+    if isinstance(source, int):
+        capture = (
+            cv2.VideoCapture(source, cv2.CAP_DSHOW)
+            if sys.platform == "win32"
+            else cv2.VideoCapture(source)
+        )
+        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))  # type: ignore[attr-defined]
+        return capture
     return cv2.VideoCapture(source)
 
 
