@@ -4,12 +4,14 @@
 # stale shebangs.
 set -euo pipefail
 
-if [ ! -x .venv/bin/python ]; then
+if [ -x .venv/bin/python ]; then
+    PY=.venv/bin/python
+elif [ -x .venv/Scripts/python.exe ]; then
+    PY=.venv/Scripts/python.exe
+else
     echo "pre-push: no .venv — run 'pip install -e \".[dev]\"'; skipping." >&2
     exit 0
 fi
-
-PY=.venv/bin/python
 
 echo "pre-push: ruff check..."
 "$PY" -m ruff check .

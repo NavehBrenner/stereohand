@@ -4,7 +4,11 @@
 # on every commit.
 set -euo pipefail
 
-if [ ! -x .venv/bin/python ]; then
+if [ -x .venv/bin/python ]; then
+    PY=.venv/bin/python
+elif [ -x .venv/Scripts/python.exe ]; then
+    PY=.venv/Scripts/python.exe
+else
     echo "pre-commit: no .venv — run 'pip install -e \".[dev]\"'; skipping." >&2
     exit 0
 fi
@@ -15,5 +19,5 @@ if [ ${#files[@]} -eq 0 ]; then
 fi
 
 echo "pre-commit: ruff format on ${#files[@]} staged file(s)..."
-.venv/bin/python -m ruff format "${files[@]}"
+"$PY" -m ruff format "${files[@]}"
 git add "${files[@]}"
