@@ -142,8 +142,15 @@ class StereoCapture:
         return max(ts_left, ts_right)
 
     def close(self) -> None:
-        self._left.close()
-        self._right.close()
+        # Each camera's close() can block for ~1s (thread join timeout) plus whatever
+        # cv2.VideoCapture.release() takes on this backend/OS — DirectShow release is
+        # slow on Windows. Closing sequentially doubles that wait; run them concurrently
+        # so total shutdown time is the slower of the two, not the sum.
+        threads = [threading.Thread(target=camera.close) for camera in (self._left, self._right)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
     def __enter__(self) -> StereoCapture:
         return self

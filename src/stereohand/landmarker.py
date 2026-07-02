@@ -14,6 +14,9 @@ The pure result parser (:func:`parse_result`) is unit-tested without a live mode
 
 from __future__ import annotations
 
+import os
+import sys
+import threading
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -189,6 +192,60 @@ def default_model_path() -> Path:
     return model
 
 
+_stderr_redirect_lock = threading.Lock()
+_stderr_redirect_refcount = 0
+_stderr_redirect_saved_fd: int | None = None
+_stderr_redirect_log_fd: int | None = None
+
+
+def native_stderr_log_path() -> Path:
+    """Where MediaPipe's suppressed native (C++) stderr output is redirected to."""
+    cache = Path.home() / ".cache" / "stereohand"
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache / "native-stderr.log"
+
+
+def _acquire_native_stderr_redirect() -> None:
+    """Redirect the OS-level stderr fd (2) to a log file for as long as any HandLandmarker
+    is alive — reference-counted so multiple instances (e.g. the stereo tracker's left/right
+    landmarkers) share one redirect.
+
+    MediaPipe's Tasks HandLandmarker writes XNNPACK-delegate/feedback-manager/NORM_RECT
+    notices straight to fd 2 from native code, bypassing Python's ``sys.stderr`` — and on
+    this platform's mediapipe wheel, ``GLOG_minloglevel``/``TF_CPP_MIN_LOG_LEVEL`` have no
+    effect (verified: they're silently ignored). Redirecting once per *session* rather than
+    around each ``process()`` call is required for correctness, not just tidiness: the
+    stereo tracker runs left/right ``process()`` concurrently on a thread pool specifically
+    so their ~20 ms CPU inferences overlap (see ``tracker.py``); a per-call redirect would
+    need a lock spanning the whole native call and serialize them back to back-to-back.
+    Redirecting to a log file rather than devnull means genuine native errors aren't lost,
+    just moved out of the console.
+    """
+    global _stderr_redirect_refcount, _stderr_redirect_saved_fd, _stderr_redirect_log_fd
+    with _stderr_redirect_lock:
+        if _stderr_redirect_refcount == 0:
+            sys.stderr.flush()
+            log_fd = os.open(str(native_stderr_log_path()), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+            saved_fd = os.dup(2)
+            os.dup2(log_fd, 2)
+            _stderr_redirect_saved_fd = saved_fd
+            _stderr_redirect_log_fd = log_fd
+        _stderr_redirect_refcount += 1
+
+
+def _release_native_stderr_redirect() -> None:
+    global _stderr_redirect_refcount, _stderr_redirect_saved_fd, _stderr_redirect_log_fd
+    with _stderr_redirect_lock:
+        _stderr_redirect_refcount = max(0, _stderr_redirect_refcount - 1)
+        if _stderr_redirect_refcount == 0 and _stderr_redirect_saved_fd is not None:
+            os.dup2(_stderr_redirect_saved_fd, 2)
+            os.close(_stderr_redirect_saved_fd)
+            assert _stderr_redirect_log_fd is not None
+            os.close(_stderr_redirect_log_fd)
+            _stderr_redirect_saved_fd = None
+            _stderr_redirect_log_fd = None
+
+
 class HandLandmarker:
     """Live single-view hand landmarking (VIDEO mode). Lazily imports mediapipe + cv2."""
 
@@ -199,26 +256,31 @@ class HandLandmarker:
         min_detection_confidence: float = 0.5,
         min_tracking_confidence: float = 0.5,
     ) -> None:
-        import mediapipe as mp
-        from mediapipe.tasks.python import BaseOptions
-        from mediapipe.tasks.python.vision import (
-            HandLandmarker as _MPHandLandmarker,
-        )
-        from mediapipe.tasks.python.vision import (
-            HandLandmarkerOptions,
-            RunningMode,
-        )
+        _acquire_native_stderr_redirect()
+        try:
+            import mediapipe as mp
+            from mediapipe.tasks.python import BaseOptions
+            from mediapipe.tasks.python.vision import (
+                HandLandmarker as _MPHandLandmarker,
+            )
+            from mediapipe.tasks.python.vision import (
+                HandLandmarkerOptions,
+                RunningMode,
+            )
 
-        self._mp = mp
-        path = str(model_path) if model_path is not None else str(default_model_path())
-        options = HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=path),
-            running_mode=RunningMode.VIDEO,
-            num_hands=1,
-            min_hand_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=min_tracking_confidence,
-        )
-        self._detector = _MPHandLandmarker.create_from_options(options)
+            self._mp = mp
+            path = str(model_path) if model_path is not None else str(default_model_path())
+            options = HandLandmarkerOptions(
+                base_options=BaseOptions(model_asset_path=path),
+                running_mode=RunningMode.VIDEO,
+                num_hands=1,
+                min_hand_detection_confidence=min_detection_confidence,
+                min_tracking_confidence=min_tracking_confidence,
+            )
+            self._detector = _MPHandLandmarker.create_from_options(options)
+        except Exception:
+            _release_native_stderr_redirect()
+            raise
 
     def process(self, frame_bgr: NDArray[np.uint8], timestamp_ms: int) -> HandLandmarks2D | None:
         """Landmark one BGR frame; ``timestamp_ms`` must be monotonically increasing."""
@@ -232,6 +294,7 @@ class HandLandmarker:
 
     def close(self) -> None:
         self._detector.close()
+        _release_native_stderr_redirect()
 
     def __enter__(self) -> HandLandmarker:
         return self
