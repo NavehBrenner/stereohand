@@ -118,6 +118,37 @@ def test_absent_when_no_synced_pair():
     assert not tracker.step().present
 
 
+def test_timestamps_strictly_increase_within_one_millisecond(monkeypatch):
+    """MediaPipe's detect_for_video demands *strictly* increasing timestamps; multiple step()s
+    inside the same millisecond must not collide (would raise 'must be monotonically increasing').
+    Freeze the clock so every step() derives the same raw ms, and assert the guard bumps them."""
+    import stereohand.tracker as tracker_mod
+
+    monkeypatch.setattr(tracker_mod.time, "monotonic", lambda: 100.0)
+
+    class _RecordingLandmarker(_FakeLandmarker):
+        def __init__(self, points):
+            super().__init__(points)
+            self.seen: list[int] = []
+
+        def process(self, frame_bgr, timestamp_ms):
+            self.seen.append(timestamp_ms)
+            return super().process(frame_bgr, timestamp_ms)
+
+    left = _RecordingLandmarker(np.zeros((21, 2)))
+    tracker = StereoHandTracker(
+        _calib(),
+        _FakeCapture(_dummy_frames()),
+        left,
+        _RecordingLandmarker(np.zeros((21, 2))),
+        rectify=False,
+    )
+    for _ in range(3):
+        tracker.step()
+
+    assert left.seen == [0, 1, 2]  # strictly increasing despite the frozen clock
+
+
 def test_write_gif_subsamples_and_downscales(tmp_path):
     from PIL import Image
 

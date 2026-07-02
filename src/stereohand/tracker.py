@@ -125,6 +125,7 @@ class StereoHandTracker:
         self._rectify = rectify
         self._maps: tuple[FloatArray, FloatArray, FloatArray, FloatArray] | None = None
         self._t0 = time.monotonic()
+        self._last_timestamp_ms = -1  # strictly-increasing MediaPipe timestamp guard (see step())
         self._latest = _ABSENT
         self.last_frames: tuple[Frame, Frame] | None = None  # latest raw pair, for display
         self.last_processed_frames: tuple[Frame, Frame] | None = None  # post-rectify, to landmarker
@@ -200,7 +201,14 @@ class StereoHandTracker:
             left, right = self._calib.rectify_pair(left, right, self._maps)
         self.last_processed_frames = (left, right)
 
+        # MediaPipe's detect_for_video requires *strictly* increasing timestamps. int(...*1000)
+        # truncates to whole milliseconds, so two step()s in the same millisecond (bursty local
+        # USB capture — seen on Windows) would submit a duplicate and raise "Input timestamp must
+        # be monotonically increasing". Clamp to at least last+1 so the sequence never stalls.
         timestamp_ms = int((time.monotonic() - self._t0) * 1000)
+        if timestamp_ms <= self._last_timestamp_ms:
+            timestamp_ms = self._last_timestamp_ms + 1
+        self._last_timestamp_ms = timestamp_ms
         fut_right = self._pool.submit(self._lm_right.process, right, timestamp_ms)
         landmarks_left = self._lm_left.process(left, timestamp_ms)
         landmarks_right = fut_right.result()
