@@ -225,9 +225,7 @@ def _acquire_native_stderr_redirect() -> None:
     with _stderr_redirect_lock:
         if _stderr_redirect_refcount == 0:
             sys.stderr.flush()
-            log_fd = os.open(
-                str(native_stderr_log_path()), os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-            )
+            log_fd = os.open(str(native_stderr_log_path()), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
             saved_fd = os.dup(2)
             os.dup2(log_fd, 2)
             _stderr_redirect_saved_fd = saved_fd
