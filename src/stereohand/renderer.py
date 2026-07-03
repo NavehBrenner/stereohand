@@ -183,6 +183,7 @@ def _render_hand_3d(
     fps: float | None = None,
     palm_xyz: np.ndarray | None = None,
     calib_msg: str | None = None,
+    warning: str | None = None,
 ) -> np.ndarray:
     """Orbiting weak-perspective view of the world; drag to orbit, scroll to zoom.
 
@@ -256,6 +257,20 @@ def _render_hand_3d(
             cv2.LINE_AA,
         )
 
+    # --- HUD: sensor sanity warning (bottom-centre, red) — e.g. inverted stereo depth ---
+    if warning:
+        (tw, _), _ = cv2.getTextSize(warning, _HUD_FONT, _HUD_SCALE, 2)
+        cv2.putText(
+            canvas,
+            warning,
+            ((width - tw) // 2, height - 16),
+            _HUD_FONT,
+            _HUD_SCALE,
+            (0, 0, 220),
+            2,
+            cv2.LINE_AA,
+        )
+
     # --- HUD: recenter calibration prompt / countdown (top-centre, prominent) ---
     if calib_msg:
         (tw, _), _ = cv2.getTextSize(calib_msg, cv2.FONT_HERSHEY_DUPLEX, 1.0, 2)
@@ -318,6 +333,7 @@ class HandRenderer:
         landmarks_2d: tuple[HandLandmarks2D | None, HandLandmarks2D | None] | None,
         landmarks_3d: np.ndarray | None,
         present: bool,
+        warning: str | None = None,
     ) -> np.ndarray | None:
         """Draw one composite frame. Call only on new data; :meth:`poll` keeps the window live.
 
@@ -367,6 +383,7 @@ class HandRenderer:
             fps=self._fps,
             palm_xyz=palm_xyz,
             calib_msg=self._calib_msg,
+            warning=warning,
         )
 
         composite: np.ndarray = cv2.vconcat([cam_panel, hand_panel])
