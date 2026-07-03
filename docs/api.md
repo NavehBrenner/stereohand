@@ -14,6 +14,19 @@ All configuration flows through `StereoHandTracker.open()` and `RenderConfig`.
 | `render_config` | `RenderConfig \| None` | `None` | Visualisation options (see below). Ignored when `render=False`. Defaults to `RenderConfig()` when `render=True`. |
 | `**landmarker_kwargs` | | | Forwarded to both `HandLandmarker` instances (see below). |
 
+### Depth sanity check (`tracker.depth_warning`)
+
+A hand triangulating *behind* the cameras (wrist z < 0) is physically impossible; a
+sustained streak of it (30 consecutive present frames, ~1 s) means the stereo geometry is
+inverted — in practice the `left`/`right` sources are swapped relative to the calibration
+(a USB replug can re-enumerate device indices). Everything else still looks healthy in
+that state (per-view detection, fps, preview) — only depth-dependent output is garbage.
+
+When tripped, the tracker logs one `logging` warning (logger `stereohand.tracker`), sets
+`tracker.depth_warning` to the message (latched for the tracker's lifetime — sources are
+fixed at construction), and the render window shows a red banner. Fix: swap the
+`left`/`right` sources, or recalibrate.
+
 ### Landmarker keyword arguments (forwarded via `**landmarker_kwargs`)
 
 | Parameter | Type | Default | Description |

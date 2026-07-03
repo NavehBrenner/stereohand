@@ -149,6 +149,79 @@ def test_timestamps_strictly_increase_within_one_millisecond(monkeypatch):
     assert left.seen == [0, 1, 2]  # strictly increasing despite the frozen clock
 
 
+def test_swapped_cameras_latch_depth_warning(caplog):
+    """Feeding each view the *other* camera's pixels (what a USB replug's index shuffle does)
+    reverses disparity, so the hand triangulates behind the cameras (z < 0). A sustained
+    streak must latch depth_warning and log exactly one warning; everything else (present,
+    shape) still looks healthy — that invisibility is the point of the check."""
+    import logging
+
+    from stereohand.tracker import _NEGATIVE_DEPTH_STREAK
+
+    calib = _calib()
+    rng = np.random.default_rng(1)
+    truth = np.column_stack([
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(0.5, 0.7, 21),
+    ])
+    pts1, pts2 = _project(calib.P1, truth), _project(calib.P2, truth)
+
+    tracker = StereoHandTracker(
+        calib,
+        _FakeCapture(_dummy_frames()),
+        _FakeLandmarker(pts2),  # swapped: left landmarker sees the right camera's pixels
+        _FakeLandmarker(pts1),
+        rectify=False,
+    )
+    with caplog.at_level(logging.WARNING, logger="stereohand.tracker"):
+        for _ in range(_NEGATIVE_DEPTH_STREAK - 1):
+            reading = tracker.step()
+        assert reading.present  # the failure mode is silent apart from depth
+        assert reading.landmarks[0, 2] < 0
+        assert tracker.depth_warning is None  # streak not yet long enough
+
+        for _ in range(_NEGATIVE_DEPTH_STREAK):
+            tracker.step()
+
+    assert tracker.depth_warning is not None
+    assert "swapped" in tracker.depth_warning
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1  # latched: warned once, not per frame
+
+
+def test_correct_cameras_never_warn_and_noise_resets_streak():
+    """Healthy positive-depth tracking must never trip the latch, and a positive frame
+    resets an accumulating streak (single noisy frames prove nothing)."""
+    from stereohand.tracker import _NEGATIVE_DEPTH_STREAK
+
+    calib = _calib()
+    rng = np.random.default_rng(2)
+    truth = np.column_stack([
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(0.5, 0.7, 21),
+    ])
+    pts1, pts2 = _project(calib.P1, truth), _project(calib.P2, truth)
+
+    tracker = StereoHandTracker(
+        calib,
+        _FakeCapture(_dummy_frames()),
+        _FakeLandmarker(pts1),
+        _FakeLandmarker(pts2),
+        rectify=False,
+    )
+    for _ in range(_NEGATIVE_DEPTH_STREAK * 2):
+        tracker.step()
+    assert tracker.depth_warning is None
+
+    # An almost-complete negative streak wiped by one healthy frame must not latch.
+    tracker._negative_depth_streak = _NEGATIVE_DEPTH_STREAK - 1
+    tracker.step()
+    assert tracker._negative_depth_streak == 0
+    assert tracker.depth_warning is None
+
+
 def test_write_gif_subsamples_and_downscales(tmp_path):
     from PIL import Image
 

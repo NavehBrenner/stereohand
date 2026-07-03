@@ -15,6 +15,7 @@ smoothing opinions: a consumer (e.g. a teleop layer) adds those on top.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -27,6 +28,16 @@ from numpy.typing import NDArray
 from stereohand.calibration import StereoCalibration
 from stereohand.landmarker import HandLandmarks2D
 from stereohand.triangulation import triangulate_points
+
+log = logging.getLogger(__name__)
+
+# Depth sanity check: a hand triangulating *behind* the cameras (wrist z < 0) is physically
+# impossible, so a sustained streak of it means the stereo geometry is inverted — in practice
+# the left/right camera sources are swapped relative to the calibration (USB replug can
+# re-enumerate device indices). One noisy frame proves nothing; this many consecutive present
+# frames (~1 s at 30 fps) does. Everything *except* depth still looks healthy in that state
+# (per-view detection, fps, preview), which is why it needs an explicit check.
+_NEGATIVE_DEPTH_STREAK = 30
 
 
 def write_gif(
@@ -127,6 +138,11 @@ class StereoHandTracker:
         self._t0 = time.monotonic()
         self._last_timestamp_ms = -1  # strictly-increasing MediaPipe timestamp guard (see step())
         self._latest = _ABSENT
+        # Depth-inversion latch (see _NEGATIVE_DEPTH_STREAK). Latched for the tracker's
+        # lifetime once tripped: the camera sources are fixed at construction, so the
+        # condition cannot heal without a restart.
+        self._negative_depth_streak = 0
+        self.depth_warning: str | None = None
         self.last_frames: tuple[Frame, Frame] | None = None  # latest raw pair, for display
         self.last_processed_frames: tuple[Frame, Frame] | None = None  # post-rectify, to landmarker
         self.last_landmark_2d: tuple[HandLandmarks2D | None, HandLandmarks2D | None] | None = None
@@ -220,11 +236,33 @@ class StereoHandTracker:
         points_3d = triangulate_points(
             self._calib.P1, self._calib.P2, landmarks_left.landmarks, landmarks_right.landmarks
         )
+        self._check_depth_sanity(float(points_3d[0, 2]))
         return self._publish(
             StereoHandReading(
                 landmarks=points_3d, present=True, handedness=landmarks_left.handedness
             )
         )
+
+    def _check_depth_sanity(self, wrist_z: float) -> None:
+        """Latch :attr:`depth_warning` after a sustained streak of behind-the-camera depth.
+
+        Warns via :mod:`logging` exactly once; the renderer also displays the latched
+        message (the console may be invisible under the MediaPipe stderr redirect).
+        """
+        if self.depth_warning is not None:
+            return
+        if wrist_z >= 0:
+            self._negative_depth_streak = 0
+            return
+        self._negative_depth_streak += 1
+        if self._negative_depth_streak >= _NEGATIVE_DEPTH_STREAK:
+            self.depth_warning = (
+                f"triangulated hand has been behind the cameras (wrist z < 0) for "
+                f"{self._negative_depth_streak} consecutive frames — the left/right camera "
+                f"sources are likely swapped relative to the calibration (a USB replug can "
+                f"re-enumerate device indices). Swap the sources, or recalibrate."
+            )
+            log.warning(self.depth_warning)
 
     def _publish(self, reading: StereoHandReading) -> StereoHandReading:
         with self._lock:
@@ -279,6 +317,9 @@ class StereoHandTracker:
             landmarks_2d=self.last_landmark_2d,
             landmarks_3d=reading.landmarks if reading.present else None,
             present=reading.present,
+            warning="DEPTH INVERTED (z<0): left/right cameras likely swapped vs calibration"
+            if self.depth_warning
+            else None,
         )
 
     def poll(self) -> bool:
