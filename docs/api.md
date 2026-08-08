@@ -9,10 +9,26 @@ All configuration flows through `StereoHandTracker.open()` and `RenderConfig`.
 | `calibration` | `StereoCalibration` | *(required)* | Stereo calibration data (load from JSON via `StereoCalibration.load()`, or obtain from `live_calibrate()`). |
 | `left` | `int \| str` | `0` | Left camera source — an integer device index (e.g. `0`) or a string URL / path (e.g. `"http://host:8080/0"`). |
 | `right` | `int \| str` | `2` | Right camera source — same format as `left`. |
-| `max_skew_s` | `float` | `0.02` | Maximum capture-timestamp difference (seconds) for a frame pair to be accepted. Increase for mismatched or high-latency cameras; decrease for tighter sync. |
+| `max_skew_s` | `float` | `0.02` | Maximum capture-timestamp difference (seconds) for a frame pair to be accepted — an **alignment-quality** knob: how simultaneous the two views must be for triangulating them to be meaningful. Increase for mismatched or high-latency cameras; decrease for tighter sync. It is *not* a drop-out remedy — a rejected pair no longer reports the hand as absent (see below), so widening this only trades triangulation accuracy away. |
 | `render` | `bool` | `False` | When `True`, create a cv2 visualisation window. Drive it with `tracker.run()` (blocking) or `tracker.render_step()` (single frame). |
 | `render_config` | `RenderConfig \| None` | `None` | Visualisation options (see below). Ignored when `render=False`. Defaults to `RenderConfig()` when `render=True`. |
 | `**landmarker_kwargs` | | | Forwarded to both `HandLandmarker` instances (see below). |
+
+### What `reading.present == False` means
+
+`present=False` means **the hand was not detected**, in one or both views, or a camera has
+stopped delivering frames (`max_age_s`, default 0.5 s). It does *not* fire merely because a
+frame pair failed the `max_skew_s` test.
+
+That distinction matters to any consumer that acts on presence rather than just drawing it.
+The two cameras free-run, so their capture timestamps drift in and out of `max_skew_s` every
+frame cycle; treating each of those misses as a lost hand makes a perfectly still hand appear
+to vanish at camera rate. The tracker now holds its last reading through such a miss — it
+carries no information about what is in front of the cameras — and `max_age_s` remains the
+backstop for a camera that has genuinely died.
+
+`StereoCapture.last_read_status` (`"ok" | "not_ready" | "stale" | "over_skew"`) exposes the
+reason for the most recent `read()` if you need to distinguish these yourself.
 
 ### Depth sanity check (`tracker.depth_warning`)
 

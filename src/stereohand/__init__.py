@@ -25,7 +25,7 @@ from stereohand.renderer import RenderConfig
 from stereohand.tracker import StereoHandReading, StereoHandTracker
 from stereohand.triangulation import triangulate_points
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "__version__",
