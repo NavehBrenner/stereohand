@@ -36,13 +36,20 @@ def _project(P, X):
 
 
 class _FakeCapture:
-    def __init__(self, pair):
+    """A capture whose pair and rejection reason are scripted.
+
+    `status` is what a real StereoCapture would leave in `last_read_status`, and step() now
+    branches on it — `None` alone no longer says whether the hand is gone.
+    """
+
+    def __init__(self, pair, status="ok"):
         self._pair = pair
+        self.last_read_status = status
 
     def read(self):
         return self._pair
 
-    def latest_pair_timestamp(self) -> float:
+    def latest_pair_timestamp(self) -> float | None:
         return 0.0  # only the background _run thread reads this; step() tests don't
 
     def close(self):
@@ -107,15 +114,61 @@ def test_dropout_when_hand_missing_in_one_view():
     assert np.array_equal(reading.landmarks, np.zeros((21, 3)))
 
 
-def test_absent_when_no_synced_pair():
+def test_absent_before_the_first_pair_arrives():
     tracker = StereoHandTracker(
         _calib(),
-        _FakeCapture(None),  # capture not ready / over-skew
+        _FakeCapture(None, status="not_ready"),
         _FakeLandmarker(np.zeros((21, 2))),
         _FakeLandmarker(np.zeros((21, 2))),
         rectify=False,
     )
     assert not tracker.step().present
+
+
+def test_stale_capture_goes_absent():
+    """A camera that stopped delivering is real loss of the hand — and the backstop that
+    makes holding through an over-skew miss safe."""
+    tracker = StereoHandTracker(
+        _calib(),
+        _FakeCapture(None, status="stale"),
+        _FakeLandmarker(np.zeros((21, 2))),
+        _FakeLandmarker(np.zeros((21, 2))),
+        rectify=False,
+    )
+    assert not tracker.step().present
+
+
+def test_over_skew_holds_previous_reading():
+    """An over-skew rejection must not overwrite a good reading with "absent".
+
+    Two free-running cameras drift in and out of phase every frame cycle (see
+    test_capture.py). Publishing absent for that stretch invented a drop-out on a hand
+    sitting still in frame, which downstream read as the hand leaving and released a
+    teleop clutch about twice a second.
+    """
+    calib = _calib()
+    rng = np.random.default_rng(0)
+    truth = np.column_stack([
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(-0.1, 0.1, 21),
+        rng.uniform(0.5, 0.7, 21),
+    ])
+    capture = _FakeCapture(_dummy_frames())
+    tracker = StereoHandTracker(
+        calib,
+        capture,
+        _FakeLandmarker(_project(calib.P1, truth)),
+        _FakeLandmarker(_project(calib.P2, truth)),
+        rectify=False,
+    )
+    good = tracker.step()
+    assert good.present
+
+    capture._pair, capture.last_read_status = None, "over_skew"
+    held = tracker.step()
+
+    assert held.present, "an out-of-phase capture must not report the hand as gone"
+    np.testing.assert_allclose(held.landmarks, good.landmarks)
 
 
 def test_timestamps_strictly_increase_within_one_millisecond(monkeypatch):

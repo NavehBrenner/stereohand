@@ -26,6 +26,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from stereohand.calibration import StereoCalibration
+from stereohand.capture import ReadStatus
 from stereohand.landmarker import HandLandmarks2D
 from stereohand.triangulation import triangulate_points
 
@@ -100,9 +101,14 @@ _ABSENT = StereoHandReading()
 
 
 class CaptureLike(Protocol):
+    #: Why the last :meth:`read` returned what it did. Part of the protocol because
+    #: :meth:`StereoHandTracker.step` cannot behave correctly without it: a bare ``None``
+    #: does not say whether the hand is gone or the cameras merely slipped out of phase.
+    last_read_status: ReadStatus
+
     def read(self) -> tuple[Frame, Frame] | None: ...
     def close(self) -> None: ...
-    def latest_pair_timestamp(self) -> float: ...
+    def latest_pair_timestamp(self) -> float | None: ...
 
 
 class LandmarkerLike(Protocol):
@@ -208,7 +214,18 @@ class StereoHandTracker:
         """One synchronous cycle: capture → rectify → landmark both → triangulate."""
         pair = self._capture.read()
         if pair is None:
-            return self._publish(_ABSENT)
+            # No pair, but "no pair" has two very different meanings and publishing the
+            # wrong one is the bug this branch exists to avoid. `stale` means a camera has
+            # stopped delivering, which really is loss of the hand. `over_skew` means only
+            # that two free-running cameras are momentarily out of phase — it carries no
+            # information about what is in front of them, so overwriting a good reading with
+            # "absent" invents a drop-out. That is what made a hand sitting still in frame
+            # flicker at camera rate and release a downstream clutch twice a second.
+            # `not_ready` holds too, and needs no special case: `_latest` starts absent.
+            if self._capture.last_read_status == "stale":
+                return self._publish(_ABSENT)
+            with self._lock:
+                return self._latest
         left, right = pair
         self.last_frames = (left, right)
         if self._rectify:
@@ -286,13 +303,21 @@ class StereoHandTracker:
         # (the teleop control loop drops to ~0.56x real-time). When `max_fps` is an int, also
         # cap processing to that rate (e.g. 10 fps even if the cameras run 30) to shed still
         # more GIL pressure; 'cam' means no cap. A 1 ms poll sits well under the frame interval.
+        #
+        # `latest_pair_timestamp` returning None means "no *usable* pair yet" — the cameras
+        # are mid-phase, not idle. Waiting is the whole point: stepping here would only reach
+        # a read() that rejects, and the loop would burn a wakeup to learn nothing.
         min_interval = 0.0 if self._max_fps == "cam" else 1.0 / self._max_fps
         last_timestamp = -1.0
         last_processed = 0.0
         while not self._stop.is_set():
             timestamp = self._capture.latest_pair_timestamp()
             now = time.monotonic()
-            if timestamp <= last_timestamp or now - last_processed < min_interval:
+            if (
+                timestamp is None
+                or timestamp <= last_timestamp
+                or now - last_processed < min_interval
+            ):
                 time.sleep(0.001)
                 continue
             last_timestamp = timestamp
