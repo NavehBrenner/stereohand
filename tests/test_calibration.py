@@ -56,7 +56,7 @@ def test_json_is_human_readable(tmp_path):
 def test_rectification_maps_identity():
     pytest.importorskip("cv2")
     calib = _synthetic_calib()
-    map1x, map1y, map2x, map2y = calib.rectification_maps()
+    map1x, map1y, _map2x, _map2y = calib.rectification_maps()
     w, h = calib.image_size
     assert map1x.shape == (h, w)
     # Zero distortion + R1=I + P1=[K|0] => the left map is the identity sampling grid.
