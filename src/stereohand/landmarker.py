@@ -20,7 +20,7 @@ import threading
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -296,8 +296,8 @@ class HandLandmarker:
         self._detector.close()
         _release_native_stderr_redirect()
 
-    def __enter__(self) -> HandLandmarker:
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.close()

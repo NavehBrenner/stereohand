@@ -19,7 +19,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -220,8 +220,8 @@ class StereoCapture:
         for thread in threads:
             thread.join()
 
-    def __enter__(self) -> StereoCapture:
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.close()

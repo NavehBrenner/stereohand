@@ -20,7 +20,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -483,8 +483,8 @@ class StereoHandTracker:
         if self._renderer is not None:
             self._renderer.destroy()
 
-    def __enter__(self) -> StereoHandTracker:
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.close()
