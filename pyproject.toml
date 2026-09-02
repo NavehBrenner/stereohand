@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff>=0.5", "mypy>=1.10", "pytest>=8.0", "poethepoet>=0.24"]
+dev = ["ruff>=0.5", "mypy>=1.10", "pytest>=8.0", "poethepoet>=0.24", "qualety>=0.1.4"]
 demo = ["matplotlib>=3.8"]
 
 [project.scripts]
@@ -78,4 +78,7 @@ fmt-check = "ruff format --check src tests scripts"  # non-mutating, for CI
 lint = "ruff check --fix src tests scripts"
 typecheck = "python -m mypy"
 test = "python -m pytest -q"
-check = ["lint", "typecheck", "test"]  # the full gate, same as CI
+# Structural rules (AST-level invariants ruff/mypy don't express). qualety ships a
+# standalone binary; `python -m qualety` is the relocated-venv-safe way to reach it.
+structure = "python -m qualety check"
+check = ["lint", "typecheck", "structure", "test"]  # the full gate, same as CI

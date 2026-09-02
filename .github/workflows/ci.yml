@@ -22,5 +22,7 @@ jobs:
         run: poe fmt-check
       - name: Typecheck
         run: poe typecheck
+      - name: Structural rules (qualety)
+        run: poe structure
       - name: Test
         run: poe test
