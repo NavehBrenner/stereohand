@@ -21,6 +21,27 @@
   - **pre-push**: full CI gate — `ruff check` + `ruff format --check` + `mypy src` + `pytest`.
   Both no-op gracefully if `.venv` is missing.
 
+## Structural rules (qualety)
+
+`poe structure` runs [qualety](https://github.com/NavehBrenner/qualety) — AST-level
+invariants ruff and mypy do not express. It is part of `poe check` and gates every PR.
+Config is `qualety.config.json`; kevin carries the same setup, so keep the two in step.
+
+Two deliberate choices, not oversights:
+
+- **`"ruff": false`.** qualety bundles its own ruff. We already gate on ruff via
+  `poe lint` with our own `select` and `known-first-party`, so the bundled phase is a
+  second, separately-configured source of truth — it produced 14 false `I001` here
+  before qualety v0.1.4 fixed config inheritance. Leave it off.
+- **Five rules are `"off"`, each for a reason:**
+
+  | rule | why off |
+  |---|---|
+  | `no-unnecessary-def`, `no-unnecessary-class` | Upstream false positive: a method called as `self._attr.method()` is not counted as a use. `StereoCapture.latest`, `HandLandmarker.process`, `Renderer.set_render_origin` and `.destroy` are all live and all reported dead ([qualety#126](https://github.com/NavehBrenner/qualety/issues/126)). |
+  | `no-public-any` | Fires on `Any` at the lazy-import boundary — `make_board` returns a `cv2.aruco.CharucoBoard` and `parse_result` takes a MediaPipe result, both deliberately annotated `Any` so the module imports without cv2/mediapipe. mypy already treats those as `Any` via `follow_imports = "skip"`, so naming them buys nothing. |
+  | `no-bare-except` | One site, `calibration.py:289`. The `except BaseException` there is a cross-thread exception ferry that re-raises on the calling thread at line 304 — narrowing to `Exception` would silently drop a `KeyboardInterrupt` raised in the worker ([qualety#106](https://github.com/NavehBrenner/qualety/issues/106)). |
+  | `public-exports-tested` | Mixed signal — some real coverage gaps, some flagged despite a test reference. Worth a deliberate coverage pass, not a gate. |
+
 ## Key Operational Scripts
 The project provides several scripts in the `scripts/` directory for core operations:
 

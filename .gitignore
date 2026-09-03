@@ -19,3 +19,7 @@ stereo_calib.json
 
 # OS
 .DS_Store
+
+# qualety's generated engine configs + cache (regenerated every run).
+# The committed config is qualety.config.json at the repo root.
+.qualety/
