@@ -86,7 +86,7 @@ def open_capture(source: int | str) -> Any:
             if sys.platform == "win32"
             else cv2.VideoCapture(source)
         )
-        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))  # type: ignore[attr-defined]
+        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc(*"MJPG"))
         return capture
     return cv2.VideoCapture(source)
 

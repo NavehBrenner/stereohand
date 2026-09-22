@@ -264,6 +264,17 @@ def calibrate_from_charuco(
     )
 
 
+def _as_point_array(corners: Any) -> Any:
+    """Corners as the ``(N, 1, 2)`` two-channel array the aruco *drawing* helpers assert on.
+
+    OpenCV 5 dropped the singleton axis from detector output — ``detectBoard`` now returns
+    ``(N, 2)`` corners — but ``drawDetectedCornersCharuco`` still asserts ``channels() == 2``,
+    so the detector's own output is not directly drawable. (The reshape is a no-op on the
+    OpenCV 4 layout, so this stays correct if the pin is ever widened again.)
+    """
+    return np.asarray(corners, dtype=np.float32).reshape(-1, 1, 2)
+
+
 def _board_detected(detector: Any, gray: Any, min_corners: int = 6) -> tuple[Any, Any]:
     """Detect the board in a grayscale frame → (charuco_corners, charuco_ids) or (None, None)."""
     corners, ids, _, _ = detector.detectBoard(gray)
@@ -401,7 +412,7 @@ def _collect_pairs(
 
         for frame, corners in ((frame_left, corners_left), (frame_right, corners_right)):
             if corners is not None:
-                cv2.aruco.drawDetectedCornersCharuco(frame, corners)
+                cv2.aruco.drawDetectedCornersCharuco(frame, _as_point_array(corners))
         preview = cv2.hconcat([frame_left, frame_right])
         colour = (0, 230, 0) if both else (0, 200, 255)
         mode = "AUTO" if auto_capture else "SPACE=capture"

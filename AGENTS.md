@@ -10,6 +10,28 @@
 - Tools: `ruff` (lint/format), `mypy` (types), `pytest` (tests), run via `poe` tasks
   (`poe fmt` / `poe lint` / `poe typecheck` / `poe test` / `poe check` — same shape as kevin).
 
+## Dependency pinning — every ceiling is deliberate
+
+`uv.lock` is gitignored (library convention: declare ranges, let consumers resolve) and
+CI installs with a bare `pip install -e ".[dev]"`, so **`pyproject.toml` is the only thing
+standing between this repo and a new upstream major**. That is not hypothetical: an open
+`opencv-contrib-python>=4.9` quietly resolved to OpenCV 5, which dropped the singleton axis
+from ChArUco point arrays while leaving `drawDetectedCornersCharuco` asserting the old
+two-channel layout. Every test passed; live calibration crashed the moment a board entered
+frame.
+
+So **every** requirement — runtime and extras — carries an upper bound at the tested
+major, and `tests/test_dependency_pins.py` enforces both halves of that:
+
+- `test_every_dependency_declares_an_upper_bound` fails if anyone adds a bare `>=`.
+- `test_installed_version_satisfies_the_declaration` fails if the environment drifts
+  outside what's declared.
+
+`ruff` and `qualety` are pre-1.0 and gate CI, so their ceiling is the **minor**, not the
+major. Raising any ceiling is a deliberate act: bump it, run `poe check`, and for anything
+touching cv2 or mediapipe also run `scripts/calibrate.py` against real cameras — the
+OpenCV 5 break was invisible to the whole suite and only appeared at a live board.
+
 ## Git workflow & hooks
 - `master` is the default branch and is **protected** — no direct pushes; all changes land via PR.
 - Work on a feature branch, open a PR, let CI pass, merge in the GitHub UI.
@@ -39,7 +61,7 @@ Two deliberate choices, not oversights:
   |---|---|
   | `no-unnecessary-def`, `no-unnecessary-class` | Upstream false positive: a method called as `self._attr.method()` is not counted as a use. `StereoCapture.latest`, `HandLandmarker.process`, `Renderer.set_render_origin` and `.destroy` are all live and all reported dead ([qualety#126](https://github.com/NavehBrenner/qualety/issues/126)). |
   | `no-public-any` | Fires on `Any` at the lazy-import boundary — `make_board` returns a `cv2.aruco.CharucoBoard` and `parse_result` takes a MediaPipe result, both deliberately annotated `Any` so the module imports without cv2/mediapipe. mypy already treats those as `Any` via `follow_imports = "skip"`, so naming them buys nothing. |
-  | `no-bare-except` | One site, `calibration.py:289`. The `except BaseException` there is a cross-thread exception ferry that re-raises on the calling thread at line 304 — narrowing to `Exception` would silently drop a `KeyboardInterrupt` raised in the worker ([qualety#106](https://github.com/NavehBrenner/qualety/issues/106)). |
+  | `no-bare-except` | One site, `calibration.py:298`. The `except BaseException` there is a cross-thread exception ferry that re-raises on the calling thread at line 313 — narrowing to `Exception` would silently drop a `KeyboardInterrupt` raised in the worker ([qualety#106](https://github.com/NavehBrenner/qualety/issues/106)). |
   | `public-exports-tested` | Mixed signal — some real coverage gaps, some flagged despite a test reference. Worth a deliberate coverage pass, not a gate. |
 
 ## Key Operational Scripts
