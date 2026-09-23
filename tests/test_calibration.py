@@ -75,3 +75,23 @@ def test_rectify_pair_identity_is_noop():
     # Identity rectification of the left camera leaves it essentially unchanged.
     assert np.mean(np.abs(rect_left.astype(int) - left.astype(int))) < 1.0
     assert rect_right.shape == right.shape
+
+
+def test_detected_corners_overlay_draws_on_live_detector_output():
+    """The preview overlay must accept whatever ``detectBoard`` hands back.
+
+    OpenCV 5 returns charuco corners as ``(N, 2)`` where OpenCV 4 returned ``(N, 1, 2)``,
+    and ``drawDetectedCornersCharuco`` asserts on two channels under both.
+    """
+    cv2 = pytest.importorskip("cv2")
+    from stereohand.board import make_board
+    from stereohand.calibration import _as_point_array, _board_detected
+
+    board = make_board()
+    image = board.generateImage((900, 700))
+    corners, ids = _board_detected(cv2.aruco.CharucoDetector(board), image)
+    assert ids is not None  # the synthetic render must detect, or the test proves nothing
+
+    frame = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    cv2.aruco.drawDetectedCornersCharuco(frame, _as_point_array(corners))
+    assert not np.array_equal(frame, cv2.cvtColor(image, cv2.COLOR_GRAY2BGR))

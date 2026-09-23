@@ -4,26 +4,40 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stereohand"
-version = "0.2.0"
+version = "0.3.0"
 description = "Two webcams to metric 3D hand landmarks: ChArUco stereo calibration + MediaPipe Tasks + linear-DLT triangulation."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Naveh Brenner", email = "navegerc@gmail.com" }]
 keywords = ["hand-tracking", "mediapipe", "stereo", "triangulation", "3d-pose", "opencv"]
+# Every constraint below carries an upper bound on purpose. `uv.lock` is gitignored
+# (library convention) and CI resolves fresh on every run, so `pyproject.toml` is the
+# only thing that decides which majors this code is built against. An open
+# `opencv-contrib-python>=4.9` is what let OpenCV 5 land unannounced and break live
+# calibration. Raising a ceiling is a deliberate act — see AGENTS.md.
 dependencies = [
-    "numpy>=1.26",
+    "numpy>=2.5,<3",
     # opencv-contrib (not plain opencv-python): we need cv2.aruco for ChArUco.
-    "opencv-contrib-python>=4.9",
+    # 5.x changed ChArUco point-array layout; see the draw-site reshape in calibration.py.
+    "opencv-contrib-python>=5.0,<6",
     # Modern Tasks HandLandmarker API (not the legacy mediapipe.solutions.hands).
-    "mediapipe>=0.10.35",
+    "mediapipe>=1.0,<2",
     # Emit a correctly-scaled printable PDF of the calibration board (cv2 can't).
-    "pillow>=10",
+    "pillow>=12,<13",
 ]
 
 [project.optional-dependencies]
-dev = ["ruff>=0.5", "mypy>=1.10", "pytest>=8.0", "poethepoet>=0.24", "qualety>=0.1.4"]
-demo = ["matplotlib>=3.8"]
+# ruff and qualety are pre-1.0: they gate CI and add rules between *minors*, so the
+# ceiling is the minor, not the major.
+dev = [
+    "ruff>=0.16,<0.17",
+    "mypy>=2.3,<3",
+    "pytest>=9,<10",
+    "poethepoet>=0.48,<1",
+    "qualety>=0.4,<0.5",
+]
+demo = ["matplotlib>=3.11,<4"]
 
 [project.scripts]
 stereohand-board = "stereohand.board:_cli"
@@ -38,6 +52,10 @@ packages = ["src/stereohand"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# ruff >=0.16 formats Python code blocks inside Markdown, and the pre-push hook checks
+# the whole tree. The README's examples align their inline comments on purpose, which
+# that formatter collapses — documentation prose is not what this gate is for.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B", "SIM"]
